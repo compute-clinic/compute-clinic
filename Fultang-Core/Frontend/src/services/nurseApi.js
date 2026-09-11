@@ -125,11 +125,12 @@ export const nurseApi = {
             const response = await axiosInstance.get('/visites/');
             const allVisites = response.data.results || response.data;
 
-            // Filtrer côté client les visites en cours (CORR-A3-007 : exclure déjà prises par autre infirmier)
+            // Visites en attente de paramètres — paiement requis sauf urgence (CORR-A3 / RG-CF-001)
             const visitesEnCours = allVisites.filter(v => {
                 if (v.statut !== 'EN_COURS') return false;
                 if (v.parametres_complets) return false;
-                return true;
+                if (v.mode_urgence) return true;
+                return v.paiement_actif === true || (v.paiement_valide === true && v.paiement_actif !== false);
             });
 
             // Enrichir chaque visite avec les détails du patient
@@ -163,13 +164,7 @@ export const nurseApi = {
                     }
                 })
             );
-            // Ajouter les patients ayant un RDV actif pris par la RÉCEPTION
-            // (routage réception → infirmier). Dédupliqué par patient.
-            const rdvItems = await fetchRendezVousWaiting(['RECEPTIONNISTE']);
-            const dejaPresents = new Set(enriched.map(v => String(v.patient.id)));
-            const rdvUniques = rdvItems.filter(r => !dejaPresents.has(String(r.patient.id)));
-
-            return [...enriched, ...rdvUniques];
+            return enriched;
         } catch (error) {
             console.error("Erreur lors de la récupération de la salle d'attente:", error);
             throw error;

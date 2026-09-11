@@ -37,3 +37,32 @@ export const getVisiteById = async (visiteId) => {
     const response = await axiosInstance.get(`/visites/${visiteId}/`);
     return response.data;
 };
+
+/**
+ * Convertit un RDV en visite concrète (accueil réception) puis clôt le RDV.
+ */
+export const convertRdvToVisite = async ({
+    patientId,
+    rdvId,
+    motif,
+    medecinOrienteId = null,
+    modeUrgence = false,
+}) => {
+    const payload = {
+        patient: patientId,
+        motif_visite: motif,
+        mode_urgence: modeUrgence,
+    };
+    if (medecinOrienteId) {
+        payload.medecin_oriente_id = medecinOrienteId;
+    }
+    const visiteResponse = await axiosInstance.post('/visites/', payload);
+    if (rdvId) {
+        try {
+            await axiosInstance.patch(`/patient/rendez-vous/${rdvId}/`, { statut: 'TERMINE' });
+        } catch (e) {
+            console.warn('RDV non clôturé après conversion:', e);
+        }
+    }
+    return visiteResponse.data;
+};

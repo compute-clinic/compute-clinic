@@ -31,19 +31,16 @@ export const WaitingRoom = () => {
         }
     };
 
-    // Si le patient vient d'un RDV (item.source === 'rdv'), il n'a pas encore de visite :
-    // on en crée une à la volée et on clôture le RDV, pour que la prise de paramètres
-    // et la suite (consultation médecin) fonctionnent normalement.
     const handleTakeParameters = async (item) => {
+        if (!item.mode_urgence && (item.paiement_valide === false || item.paiement_actif === false)) {
+            setError(item.paiement_valide
+                ? 'CORR-A2-002 : paiement expiré — orientez le patient vers la caisse.'
+                : 'RG-CF-001 : consultation non payée — orientez le patient vers la caisse.');
+            return;
+        }
         try {
-            let visiteId = item.id;
-            if (item.source === 'rdv') {
-                const visite = await nurseApi.createVisite(item.patient.id, item.motif_visite || "Consultation");
-                visiteId = visite.id;
-                if (item.rdvId) await nurseApi.terminerRendezVous(item.rdvId);
-            }
-            await prendreVisiteEnCharge(visiteId);
-            navigate(AppRoutesPaths.patientDetailsPage.replace(':id', item.patient.id) + `?visite=${visiteId}`);
+            await prendreVisiteEnCharge(item.id);
+            navigate(AppRoutesPaths.patientDetailsPage.replace(':id', item.patient.id) + `?visite=${item.id}`);
         } catch (err) {
             const msg = err.response?.status === 409
                 ? 'Ce patient est déjà pris en charge par un autre infirmier.'
