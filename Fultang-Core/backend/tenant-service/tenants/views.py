@@ -50,8 +50,14 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .internal_clients import AdminProvisioningError, create_first_admin
-from .emails import send_tenant_admin_welcome_email
+from .internal_clients import AdminProvisioningError, create_first_admin, get_tenant_admin_emails
+from .emails import (
+    send_tenant_admin_welcome_email,
+    send_tenant_suspended_email,
+    send_tenant_reactivated_email,
+    send_service_disabled_email,
+    send_service_enabled_email,
+)
 from .models import (
     AdminAction,
     FunctionalService,
@@ -227,6 +233,16 @@ class TenantViewSet(mixins.CreateModelMixin,
             AdminAction.TENANT_STATUS_CHANGED, tenant,
             f"Statut changé en {new_status}.", status=new_status,
         )
+
+        # Notification email (mission dédiée) — TOUJOURS après que
+        # l'opération métier et l'audit ont réussi, jamais avant, jamais à
+        # leur place (§8) : best-effort, ne peut jamais faire échouer cette
+        # réponse (voir emails.py::_send_notification_email).
+        recipient_emails = get_tenant_admin_emails(tenant.id)
+        if new_status == TenantStatus.INACTIVE:
+            send_tenant_suspended_email(tenant_name=tenant.name, recipient_emails=recipient_emails)
+        else:
+            send_tenant_reactivated_email(tenant_name=tenant.name, recipient_emails=recipient_emails)
 
         return Response(TenantSerializer(tenant).data, status=status.HTTP_200_OK)
 
@@ -659,7 +675,7 @@ class TenantViewSet(mixins.CreateModelMixin,
         body_serializer.is_valid(raise_exception=True)
         pairs = [(item['code'], item['enabled']) for item in body_serializer.validated_data['services']]
 
-        return self._apply_functional_service_pairs(tenant, pairs)
+        return self._apply_functional_service_pairs(tenant, pairs)  # notify=False : création initiale, jamais un "changement" à signaler
 
     @action(detail=True, methods=['post'], url_path='functional-services/bulk-confirmed')
     def bulk_set_functional_services_confirmed(self, request, id=None):
@@ -697,15 +713,21 @@ class TenantViewSet(mixins.CreateModelMixin,
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        return self._apply_functional_service_pairs(tenant, pairs)
+        return self._apply_functional_service_pairs(tenant, pairs, notify=True)  # établissement déjà en production : notifier
 
-    def _apply_functional_service_pairs(self, tenant, pairs):
+    def _apply_functional_service_pairs(self, tenant, pairs, *, notify=False):
         """
         Partagé par `bulk_set_functional_services` (wizard) et
         `bulk_set_functional_services_confirmed` (fiche établissement) —
         UNE SEULE implémentation de l'écriture réelle, de l'audit et de
         l'invalidation de cache : la double confirmation renforcée ne
         touche jamais à cette logique métier.
+
+        `notify=True` UNIQUEMENT depuis `bulk_set_functional_services_confirmed`
+        (mission dédiée, notifications email) : la sélection initiale des
+        services à l'étape 3 du wizard de création n'est jamais un
+        "changement" à signaler à un administrateur qui n'a souvent même
+        pas encore de compte actif à ce stade.
         """
         try:
             self.functional_service_service.bulk_set(tenant.id, pairs)
@@ -729,6 +751,10 @@ class TenantViewSet(mixins.CreateModelMixin,
         # changement soit réellement pris en compte.
         for code, _enabled in pairs:
             invalidate_functional_service_cache(tenant.id, code)
+
+        if notify:
+            for code, enabled in pairs:
+                self._notify_service_toggle(tenant, code, enabled)
 
         data = self.functional_service_service.list_for_tenant(tenant.id)
         return Response(TenantFunctionalServiceSerializer(data, many=True).data, status=status.HTTP_200_OK)
@@ -769,8 +795,23 @@ class TenantViewSet(mixins.CreateModelMixin,
         # Invalidation active du cache (Cycle de vie du tenant, Phase 3).
         invalidate_functional_service_cache(tenant.id, service_code)
 
+        self._notify_service_toggle(tenant, service_code, enabled)
+
         data = self.functional_service_service.list_for_tenant(tenant.id)
         return Response(TenantFunctionalServiceSerializer(data, many=True).data, status=status.HTTP_200_OK)
+
+    def _notify_service_toggle(self, tenant, service_code, enabled):
+        """
+        Notification email (mission dédiée) partagée par `toggle_functional_service`
+        et `_apply_functional_service_pairs` — best-effort, jamais avant que
+        l'opération métier et l'invalidation de cache n'aient réussi (§8).
+        """
+        recipient_emails = get_tenant_admin_emails(tenant.id)
+        service_name = FunctionalService.objects.filter(code=service_code).values_list('name', flat=True).first() or service_code
+        if enabled:
+            send_service_enabled_email(tenant_name=tenant.name, service_name=service_name, recipient_emails=recipient_emails)
+        else:
+            send_service_disabled_email(tenant_name=tenant.name, service_name=service_name, recipient_emails=recipient_emails)
 
     @action(
         detail=True, methods=['post', 'delete'], url_path='logo',

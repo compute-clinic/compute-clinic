@@ -19,10 +19,11 @@ export const verifyAdminActivationToken = async (tenantId, token) => {
     return response.data;
 };
 
-export const completeAdminActivation = async (tenantId, token, password, passwordConfirm) => {
+export const completeAdminActivation = async (tenantId, token, username, password, passwordConfirm) => {
     const response = await axios.post(`${getGatewayBaseUrl()}/personnel/activate-admin/activate/`, {
         tenant_id: tenantId,
         token,
+        username,
         password,
         password_confirm: passwordConfirm,
     });

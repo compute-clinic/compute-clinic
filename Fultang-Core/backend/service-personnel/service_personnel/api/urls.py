@@ -6,7 +6,7 @@ from .views import (
     PharmacienViewSet, DirecteurViewSet, AdminViewSet, AuthVerifyView, PersonnelViewSet,
     PrimeViewSet, ProvisionDatabaseView, CreateFirstAdminView, FunctionalServiceInvalidateView,
     ArchiveTenantDataView, DeprovisionTenantDataView,
-    AdminActivationVerifyView, AdminActivationCompleteView,
+    AdminActivationVerifyView, AdminActivationCompleteView, TenantAdminEmailsView,
 )
 
 router = DefaultRouter()
@@ -35,6 +35,7 @@ urlpatterns = [
         'internal/functional-services/invalidate/', FunctionalServiceInvalidateView.as_view(),
         name='internal-functional-services-invalidate',
     ),
+    path('internal/tenant-admin-emails/', TenantAdminEmailsView.as_view(), name='internal-tenant-admin-emails'),
     path('internal/archive-tenant-data/', ArchiveTenantDataView.as_view(), name='internal-archive-tenant-data'),
     path(
         'internal/deprovision-tenant-data/', DeprovisionTenantDataView.as_view(),

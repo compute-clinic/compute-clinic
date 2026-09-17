@@ -17,8 +17,9 @@ succès).
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
-from typing import Optional
+from typing import List, Optional
 
 from django.conf import settings
 
@@ -58,6 +59,56 @@ def call_internal_service(base_url: str, path: str, payload: dict, timeout: Opti
     except (urllib.error.URLError, TimeoutError) as exc:
         logger.error("Appel interne %s injoignable : %s", url, exc)
         raise InternalServiceCallError(f"{path} injoignable : {exc}") from exc
+
+
+def call_internal_service_get(base_url: str, path: str, params: dict, timeout: Optional[int] = None) -> dict:
+    """
+    Variante GET de `call_internal_service` — même jeton interne, mêmes
+    règles d'erreur. Ajoutée pour les notifications email des opérations
+    majeures (mission dédiée) : `get_tenant_admin_emails` ci-dessous est un
+    appel de LECTURE (récupérer des adresses email), jamais une action à
+    effet de bord — un POST aurait été sémantiquement incorrect.
+    """
+    query = urllib.parse.urlencode(params)
+    url = f"{base_url.rstrip('/')}/{path.lstrip('/')}?{query}"
+    request = urllib.request.Request(
+        url,
+        headers={"X-Internal-Service-Token": settings.TENANT_SERVICE_INTERNAL_TOKEN},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout or settings.PROVISIONING_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        logger.error("Appel interne %s a échoué : HTTP %s", url, exc.code)
+        raise InternalServiceCallError(f"{path} a répondu {exc.code} : {body[:300]}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        logger.error("Appel interne %s injoignable : %s", url, exc)
+        raise InternalServiceCallError(f"{path} injoignable : {exc}") from exc
+
+
+def get_tenant_admin_emails(tenant_id) -> List[str]:
+    """
+    Récupère les adresses email des comptes Admin d'un tenant, pour les
+    notifications email des opérations majeures (mission dédiée) —
+    réutilise la relation DÉJÀ existante tenant/administrateur (aucune
+    nouvelle adresse stockée dans tenant-service). Réservé au service
+    PERSONNEL, seul à connaître les comptes Admin.
+
+    best-effort : retourne une liste VIDE (jamais une exception propagée)
+    si l'appel échoue — une notification manquée ne doit jamais faire
+    échouer l'opération métier (suspension/réactivation/toggle de service)
+    qu'elle est censée signaler (§8 de la mission). Le détail de l'échec
+    est journalisé pour investigation.
+    """
+    base_url = f"{settings.PROVISIONING_SERVICE_PERSONNEL_URL.rstrip('/')}/api"
+    try:
+        data = call_internal_service_get(base_url, "internal/tenant-admin-emails/", {"tenant_id": str(tenant_id)})
+        return data.get("emails", [])
+    except InternalServiceCallError as exc:
+        logger.warning("Impossible de récupérer les emails admin du tenant %s : %s", tenant_id, exc)
+        return []
 
 
 class AdminProvisioningError(Exception):

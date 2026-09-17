@@ -13,16 +13,23 @@ import { resolveTenantLogoUrl } from "../Utils/gatewayUrls.js";
  *     un appel PUBLIC) au lieu d'appeler `useTenantBranding`
  *     (authentifié, réservé à l'espace hospitalier connecté) ;
  *   - propose une variante `light`/`dark` selon le fond de la page hôte,
- *     `TenantBrandHeader` étant lui figé pour un fond de sidebar sombre.
+ *     `TenantBrandHeader` étant lui figé pour un fond de sidebar sombre ;
+ *   - propose une taille de logo `md` (défaut, login/activation) ou `lg`
+ *     (landing — logo jugé trop petit, agrandi de façon responsive tout
+ *     en conservant ses proportions et sa lisibilité).
  *
  * N'affiche rien si `tenant` est absent (hostname hors convention, ex.
  * développement classique sur `localhost` sans sous-domaine) — la
  * landing/le login génériques restent alors inchangés.
  */
-export function PublicTenantIdentity({ tenant, variant = "light" }) {
+export function PublicTenantIdentity({ tenant, variant = "light", size = "md" }) {
     if (!tenant) return null;
     const isDark = variant === "dark";
     const logoUrl = resolveTenantLogoUrl(tenant.logo_display_url);
+    // Seule la taille du LOGO change selon `size` (demande explicite :
+    // "le logo est trop petit, l'agrandir" — le texte du nom garde sa
+    // taille existante, inchangée par ce correctif).
+    const logoSizeClass = size === "lg" ? "w-20 h-20 sm:w-24 sm:h-24" : "w-14 h-14";
 
     return (
         <div className="flex flex-col items-start">
@@ -30,7 +37,7 @@ export function PublicTenantIdentity({ tenant, variant = "light" }) {
                 <img
                     src={logoUrl}
                     alt="Logo de l'établissement"
-                    className="w-14 h-14 rounded-xl object-contain bg-white/90 p-1 mb-2 shadow-sm"
+                    className={`${logoSizeClass} rounded-xl object-contain bg-white/90 p-1 mb-2 shadow-sm`}
                 />
             )}
             <p className={`text-2xl font-bold leading-tight break-words ${isDark ? "text-white" : "text-gray-800"}`}>
@@ -49,6 +56,7 @@ PublicTenantIdentity.propTypes = {
         logo_display_url: PropTypes.string,
     }),
     variant: PropTypes.oneOf(["light", "dark"]),
+    size: PropTypes.oneOf(["md", "lg"]),
 };
 
 export default PublicTenantIdentity;

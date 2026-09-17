@@ -10,7 +10,7 @@ import { ChangePasswordModal } from "../../GlobalComponents/ChangePasswordModal.
 import { useTranslation } from "react-i18next";
 import { APP_NAME } from "../../constants/branding.js";
 import { usePublicTenantResolution } from "../../hooks/usePublicTenantResolution.js";
-import { EstablishmentNotFoundScreen } from "../../GlobalComponents/EstablishmentNotFoundScreen.jsx";
+import { NotFound } from "../../GlobalComponents/NotFound.jsx";
 import { PublicTenantIdentity } from "../../GlobalComponents/PublicTenantIdentity.jsx";
 import { Loading } from "../../GlobalComponents/Loading.jsx";
 export function LoginPage() {
@@ -133,7 +133,7 @@ export function LoginPage() {
     // landing (voir LandingPage.jsx) — un sous-domaine tenant inexistant ne
     // doit jamais afficher le formulaire de connexion.
     if (checking) return <Loading />;
-    if (blocked) return <EstablishmentNotFoundScreen />;
+    if (blocked) return <NotFound />;
 
     return (
         <>

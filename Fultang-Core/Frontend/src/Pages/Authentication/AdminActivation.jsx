@@ -4,7 +4,7 @@ import { ShieldCheck, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 import { AppRoutesPaths as appRouterPaths } from "../../Router/appRouterPaths.js";
 import { APP_NAME } from "../../constants/branding.js";
 import { usePublicTenantResolution } from "../../hooks/usePublicTenantResolution.js";
-import { EstablishmentNotFoundScreen } from "../../GlobalComponents/EstablishmentNotFoundScreen.jsx";
+import { NotFound } from "../../GlobalComponents/NotFound.jsx";
 import { PublicTenantIdentity } from "../../GlobalComponents/PublicTenantIdentity.jsx";
 import { Loading } from "../../GlobalComponents/Loading.jsx";
 import { verifyAdminActivationToken, completeAdminActivation } from "../../services/adminActivationApi.js";
@@ -37,6 +37,7 @@ export function AdminActivationPage() {
     const [invalidMessage, setInvalidMessage] = useState("");
     const [adminIdentity, setAdminIdentity] = useState(null);
 
+    const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [passwordConfirm, setPasswordConfirm] = useState("");
     const [showPassword, setShowPassword] = useState(false);
@@ -76,7 +77,7 @@ export function AdminActivationPage() {
         }
         setSubmitting(true);
         try {
-            await completeAdminActivation(tenantId, token, password, passwordConfirm);
+            await completeAdminActivation(tenantId, token, username, password, passwordConfirm);
             setStatus("success");
         } catch (error) {
             const detail = error?.response?.data?.detail;
@@ -93,7 +94,7 @@ export function AdminActivationPage() {
     const blockClipboard = (e) => e.preventDefault();
 
     if (checkingTenant) return <Loading />;
-    if (tenantBlocked) return <EstablishmentNotFoundScreen />;
+    if (tenantBlocked) return <NotFound />;
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -135,16 +136,10 @@ export function AdminActivationPage() {
                     {status === "form" && (
                         <>
                             <h2 className="text-xl font-bold text-gray-800 mb-1">Activation de votre compte</h2>
-                            <p className="text-sm text-gray-500 mb-6">
+                            <p className="text-sm text-gray-500 mb-1">
                                 Définissez vos identifiants pour accéder à votre espace d&apos;administration.
                             </p>
-
-                            <div className="mb-4">
-                                <label className="text-sm font-bold text-gray-700 mb-2 block">Nom d&apos;utilisateur</label>
-                                <div className="h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center px-3 text-gray-500">
-                                    {adminIdentity?.email}
-                                </div>
-                            </div>
+                            <p className="text-xs text-gray-400 mb-6">Compte : {adminIdentity?.email}</p>
 
                             {formError && (
                                 <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600">
@@ -153,6 +148,21 @@ export function AdminActivationPage() {
                             )}
 
                             <form onSubmit={handleSubmit} className="flex flex-col">
+                                <label className="text-sm font-bold text-gray-700 mb-2">Nom d&apos;utilisateur</label>
+                                <input
+                                    type="text"
+                                    required
+                                    minLength={3}
+                                    maxLength={150}
+                                    pattern="[A-Za-z0-9_.\-]{3,150}"
+                                    title="3 à 150 caractères : lettres, chiffres, points, tirets, underscores."
+                                    autoComplete="username"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    className="w-full h-12 px-3 mb-4 rounded-lg bg-gray-100 border border-gray-200 outline-none focus:outline-none focus:ring-0"
+                                    placeholder="ex. j.dupont"
+                                />
+
                                 <label className="text-sm font-bold text-gray-700 mb-2">Mot de passe</label>
                                 <div className="bg-gray-100 border border-gray-200 h-12 rounded-lg mb-4 flex items-center relative">
                                     <input

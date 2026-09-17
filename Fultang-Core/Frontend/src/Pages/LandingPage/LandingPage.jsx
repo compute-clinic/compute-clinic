@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { APP_NAME_DISPLAY } from '../../constants/branding.js';
 import { usePublicTenantResolution } from '../../hooks/usePublicTenantResolution.js';
-import { EstablishmentNotFoundScreen } from '../../GlobalComponents/EstablishmentNotFoundScreen.jsx';
+import { NotFound } from '../../GlobalComponents/NotFound.jsx';
 import { PublicTenantIdentity } from '../../GlobalComponents/PublicTenantIdentity.jsx';
 import { Loading } from '../../GlobalComponents/Loading.jsx';
 
@@ -69,7 +69,7 @@ export function LandingPage() {
     // sans appel réseau) que le cas "sous-domaine tenant en cours de
     // vérification".
     if (checking) return <Loading />;
-    if (blocked) return <EstablishmentNotFoundScreen />;
+    if (blocked) return <NotFound />;
 
     return (
         <div className="min-h-screen">
@@ -86,18 +86,23 @@ export function LandingPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-primary-start/40 to-primary-end/40"></div>
     </div>
 
+    {/* Identité de l'établissement — en haut à gauche, même principe visuel
+        que la page de connexion (Login.jsx) : logo + nom + ComputeClinic en
+        second. Logo agrandi (size="lg") par rapport au login/à l'activation,
+        où la taille par défaut reste appropriée. */}
+    {tenant && (
+        <div className="container mx-auto px-6 pt-6 relative z-10">
+            <PublicTenantIdentity tenant={tenant} variant="dark" size="lg" />
+        </div>
+    )}
+
     {/* Contenu */}
-    <div className="container mx-auto px-6 pt-16 relative z-10">
+    <div className="container mx-auto px-6 pt-10 relative z-10">
         <div className="flex flex-col items-center text-center">
             <div className="w-full max-w-2xl">
-                {tenant && (
-                    <div className="mb-6">
-                        <PublicTenantIdentity tenant={tenant} variant="dark" />
-                    </div>
-                )}
-                <h1 className="text-4xl md:text-5xl font-bold text-white text-left mb-4">
+                <h1 className="text-4xl md:text-5xl font-bold text-white text-left mb-4 break-words">
                     {tenant ? (
-                        <>Bienvenue à<br />{tenant.name}</>
+                        `Bienvenue à ${tenant.name}`
                     ) : (
                         <>Welcome to<br />{APP_NAME_DISPLAY}</>
                     )}

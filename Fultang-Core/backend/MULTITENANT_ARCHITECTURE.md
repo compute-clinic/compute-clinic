@@ -1866,6 +1866,55 @@ Restauration automatique, réactivation d'un tenant supprimé, destruction de l'
 
 **Limite assumée** : le blocage reste déclenché par la PROCHAINE requête (action ou rafraîchissement) — comme pour la suspension, aucun mécanisme de coupure "instantanée" sans action de l'utilisateur (push temps réel/WebSocket) n'existe dans l'architecture actuelle ; en ajouter un serait une nouvelle brique d'infrastructure, hors périmètre de ce correctif.
 
+### 14.15 Accès tenant public, onboarding admin sécurisé, notifications email des opérations majeures
+
+#### 14.15.1 Landing/login tenant-aware et blocage d'un tenant inexistant
+
+**AVANT** : `/` (landing) et `/login` rendaient sans jamais vérifier l'existence du tenant déduit du hostname — aucun appel API, aucun garde. Le Gateway bloquait déjà correctement un hostname inexistant, mais **uniquement pour les appels API proxyfiés** ; la landing/le login n'en faisaient aucun, donc rien ne déclenchait ce contrôle.
+
+**APRÈS** : nouvel endpoint **public** (le seul de tenant-service, `AllowAny`) `GET /tenants/tenants/public-info/?identifier=<id>` (`tenants/views.py::TenantViewSet.public_info`, `TenantPublicInfoSerializer`) — réutilise la même recherche que l'endpoint interne `resolve` (`get_tenant_by_identifier`), n'expose que `name`/`identifier`/`logo_display_url` (jamais `id`/`status`/aucune configuration). 404 si l'identifiant ne correspond à aucun tenant ; 200 aussi bien pour un tenant actif que suspendu (seule l'EXISTENCE est en jeu ici — la suspension reste appliquée ailleurs, au login).
+
+Côté frontend : `hooks/usePublicTenantResolution.js` (fail-closed : toute erreur bloque, contrairement à `useFunctionalServiceGate` qui est une simple optimisation d'affichage) appelle cet endpoint au montage de `LandingPage.jsx`/`Login.jsx`/`AdminActivation.jsx`. `blocked=true` → rendu de **la page 404 déjà existante** (`GlobalComponents/NotFound.jsx`, réutilisée telle quelle — un écran dédié (`EstablishmentNotFoundScreen.jsx`) avait été créé puis **supprimé** sur demande explicite, pour ne jamais dupliquer un 404 déjà existant). `hasTenantContext=false` (hostname hors convention, ex. `localhost` en développement classique) n'est PAS traité comme un tenant inexistant : la landing/le login génériques restent alors affichés, inchangés.
+
+Identité de l'établissement (logo + nom, ComputeClinic en second) : composant partagé `GlobalComponents/PublicTenantIdentity.jsx`, utilisé par la landing, le login et la page d'activation admin — même principe que `TenantBrandHeader.jsx` (sidebars hospitalières authentifiées) mais alimenté par l'appel PUBLIC ci-dessus. Prop `size` (`md` par défaut, `lg` pour la landing où le logo était jugé trop petit — seule sa taille change, jamais celle du texte). Sur la landing, l'identité est positionnée en haut à gauche (même principe visuel que le login), et le texte « Bienvenue à {nom} » n'utilise plus de retour à la ligne forcé (`<br/>`) : le nom flue naturellement (`break-words`, sans `<br/>` imposé) — une seule ligne pour un nom court, un retournement naturel pour un nom long, sans réduction de la taille de police ni coupure au milieu d'un mot.
+
+#### 14.15.2 Onboarding admin sécurisé (mot de passe + nom d'utilisateur définis par l'administrateur)
+
+**AVANT** : `CreateFirstAdminView` (service-personnel) générait un mot de passe temporaire non cryptographique (`"Fultang@" + random.randint(100,999)`, 900 valeurs possibles) et `send_tenant_admin_welcome_email` l'envoyait **en clair** par email, avec l'identifiant.
+
+**APRÈS** :
+- `Admin.compte_active` (`BooleanField`, défaut `True` — aucun impact sur les comptes existants) : `False` UNIQUEMENT pour le compte créé par `CreateFirstAdminView`, tant qu'il n'a pas été activé. `AuthVerifyView` refuse (403) toute connexion tant que `compte_active` vaut `False`, même avec le mot de passe de remplissage aléatoire (32 octets, jamais transmis).
+- `AdminActivationToken` (`service_personnel/api/models.py`) : `token` (`secrets.token_urlsafe(32)`, unique), `expires_at` (72h), `used_at` (usage unique), FK directe vers `Admin` (même base tenant, routée identiquement) + `tenant_id` dénormalisé pour une vérification d'isolation EXPLICITE (jamais une confiance implicite dans la seule relation).
+- Deux endpoints publics dédiés (`AllowAny`, `authentication_classes=[]`) : `GET /personnel/activate-admin/verify/?tenant_id=&token=` (lecture seule) et `POST /personnel/activate-admin/activate/` (définit `username`+mot de passe, active le compte, invalide le token — atomique). `tenant_id` est fourni explicitement par le frontend (jamais déduit d'un header Gateway : `_build_user_headers` ne forwarde `X-Tenant-ID` que pour un appel porteur d'un JWT, jamais pour un appel anonyme) — nécessaire pour que `TenantDatabaseRouter` route vers la bonne base.
+- `Admin.username` (ajouté aux corrections finales) : défini par l'administrateur pendant l'activation, enregistré sur **ce même compte** (jamais un second compte), unique par tenant (`UniqueConstraint(tenant_id, username)`, `null=True` pour les comptes existants). Ne remplace PAS `email` comme identifiant de connexion — `AuthVerifyView` continue de matcher par email, inchangé : `username` est une donnée de profil supplémentaire. Validation minimale (3-150 caractères, `[A-Za-z0-9_.-]`) faute d'une règle existante à réutiliser.
+- `tenant-service/tenants/emails.py::send_tenant_admin_welcome_email` ne transmet plus qu'un lien (`{establishment_url}/activation-admin?tenant_id=...&token=...`, construit par `provision_admin` à partir de l'URL RÉELLE de l'établissement) — plus aucun mot de passe.
+- Frontend : `Pages/Authentication/AdminActivation.jsx` — vérifie le lien au montage, formulaire (nom d'utilisateur, mot de passe, confirmation — copier/coller bloqué sur la confirmation), écran de succès avec bouton "Se connecter" vers le login du tenant (jamais de connexion automatique).
+
+Isolation multi-tenant : `_resolve_activation_token` compare `activation_token.tenant_id` au `tenant_id` fourni — un token émis pour le tenant A renvoie 404 ("lien invalide", jamais un message distinguant "tenant différent" de "token inconnu") pour tout autre tenant.
+
+#### 14.15.3 Double confirmation renforcée (validation backend, anti copier-coller)
+
+**AVANT** : `ConfirmAction.Modal.jsx`'s `requireTypedConfirmation` n'était qu'un contrôle FRONTEND (bouton désactivé tant que la saisie ne correspondait pas) — jamais revérifié côté serveur, et le champ acceptait le copier-coller.
+
+**APRÈS** :
+- `ConfirmAction.Modal.jsx` : `onPaste`/`onCopy`/`onCut`/`onDrop`/`onContextMenu` bloqués sur le champ, `autoComplete="off"` — protection FRONTEND uniquement, jamais suffisante seule (voir ci-dessous).
+- `PATCH /tenants/{id}/status/` (suspension uniquement, `status=INACTIVE`) et `POST /tenants/{id}/delete/` exigent désormais `{"confirmation": "<nom exact du tenant>"}`, revérifié côté serveur (400 sinon, aucune opération tentée). Une réactivation n'exige rien de plus (action restauratrice, jamais destructive).
+- Nouvel endpoint dédié `POST /tenants/{id}/functional-services/bulk-confirmed/` (fiche d'un établissement EXISTANT, `ServicesConfigSection.jsx`) — exige `confirmation` (codes désactivés triés, joints par une virgule) UNIQUEMENT si au moins un service est désactivé dans le lot. **Distinct** de `bulk_set_functional_services` (étape 3 du wizard de création, INCHANGÉ, aucune confirmation) : les deux appellent le même `_apply_functional_service_pairs` partagé (écriture/audit/invalidation de cache identiques), seul le contrôle de confirmation en amont diffère.
+
+#### 14.15.4 Notifications email des opérations majeures
+
+Nouvelle demande : notifier l'administrateur d'un établissement par email lors d'une suspension, réactivation, désactivation ou (ré)activation de service — en réutilisant la relation DÉJÀ existante tenant/Admin (aucune nouvelle adresse stockée).
+
+- `service-personnel` : nouvel endpoint interne `GET /api/internal/tenant-admin-emails/?tenant_id=` (`IsInternalService`), retourne les emails de TOUS les comptes Admin du tenant (actifs ou non — un compte en attente d'activation reste un administrateur légitime). Liste vide (jamais une erreur) si aucun Admin n'existe encore.
+- `tenant-service/tenants/internal_clients.py` : `call_internal_service_get` (variante GET du client interne existant) + `get_tenant_admin_emails(tenant_id)`, **best-effort** — retourne `[]` sur tout échec, ne lève jamais (une notification manquée ne doit jamais faire échouer l'opération métier qu'elle signale).
+- `tenant-service/tenants/emails.py` : 4 nouvelles fonctions (`send_tenant_suspended_email`, `send_tenant_reactivated_email`, `send_service_disabled_email`, `send_service_enabled_email`), textes imposés par la mission, aucune donnée sensible. Envoi INDIVIDUEL à chaque destinataire (jamais un `recipient_list` groupé, pour qu'un administrateur ne voie jamais l'adresse des autres) ; un échec d'envoi est journalisé (`logger.warning`) et n'interrompt jamais la boucle ni la réponse HTTP.
+- Câblées dans `update_status` (suspension/réactivation, après audit) et dans `_apply_functional_service_pairs` UNIQUEMENT via le nouveau paramètre `notify=True` (passé par `bulk_set_functional_services_confirmed`, jamais par le wizard de création) et dans `toggle_functional_service` (endpoint legacy, actuellement sans appelant frontend actif, câblé par cohérence/défense en profondeur). Ordre strict respecté partout : validation → opération métier → mise à jour de l'état/audit/invalidation de cache → notification.
+- **Limite d'observabilité découverte** (non liée à ce correctif) : `tenant-service/config/settings.py` ne définit aucun dict `LOGGING` — les logs `INFO` des loggers applicatifs (dont `tenants.emails`) ne remontent donc pas dans `docker logs` par défaut (seul `WARNING`+ le fait, via le handler `lastResort` de Python). Les envois ont été vérifiés directement (`send_mail` invoqué avec logging explicitement activé, aucune exception, adresse réelle du compte SMTP configuré) plutôt que par lecture des logs du conteneur.
+
+#### 14.15.5 Tests
+
+`tenant-service` : 166/166 (baseline 164 + 2 nouveaux, confirmation de suspension). `service-personnel` : 75/80 (baseline 73 + 5 nouveaux — activation avec username, isolation, format/unicité) ; **5 échecs préexistants confirmés indépendants** de ce chantier (`date_embauche` obligatoire, `PersonnelViewSetPasswordTests`/`FunctionalServiceEnforcementEndpointTests`, introduit par le commit historique `c2a0883`, bien avant ce travail). `api-gateway` : 34/34 non régressés (mêmes 9 échecs préexistants, confirmés indépendants via `git stash`). Suite E2E live sur la stack HTTP réelle : gating tenant inexistant, parcours d'activation complet avec nom d'utilisateur (y compris token réutilisé/tenant croisé refusés), double confirmation backend (suspension/suppression/service), et les 4 gabarits de notification vérifiés par envoi réel via le compte SMTP configuré.
+
 ---
 
 ## 15. Sécurité

@@ -792,7 +792,7 @@ class CreateFirstAdminEndpointTests(APITestCase):
         activate_response = self.client.post(
             '/api/activate-admin/activate/',
             {
-                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token,
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token, 'username': 'j.dupont',
                 'password': 'MonMotDePasse2026!', 'password_confirm': 'WRONG-not-matching',
             },
             format='json',
@@ -816,7 +816,7 @@ class CreateFirstAdminEndpointTests(APITestCase):
         activate_response = self.client.post(
             '/api/activate-admin/activate/',
             {
-                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token,
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token, 'username': 'j.dupont.ok',
                 'password': 'MonMotDePasse2026!', 'password_confirm': 'MonMotDePasse2026!',
             },
             format='json',
@@ -825,6 +825,7 @@ class CreateFirstAdminEndpointTests(APITestCase):
 
         created = Admin.objects.using('default').get(email='activates-ok@example.test')
         self.assertTrue(created.compte_active)
+        self.assertEqual(created.username, 'j.dupont.ok')
 
         login_response = self.client.post(
             '/api/auth/verify/',
@@ -840,12 +841,53 @@ class CreateFirstAdminEndpointTests(APITestCase):
         second_attempt = self.client.post(
             '/api/activate-admin/activate/',
             {
-                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token,
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token, 'username': 'j.dupont.ok2',
                 'password': 'AutreMotDePasse2026!', 'password_confirm': 'AutreMotDePasse2026!',
             },
             format='json',
         )
         self.assertEqual(second_attempt.status_code, status.HTTP_409_CONFLICT)
+
+    def test_activation_requires_a_valid_username_format(self):
+        response = self._post({
+            'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'prenom': 'Jean', 'email': 'bad-username@example.test',
+        })
+        activation_token = response.data['activation_token']
+        activate_response = self.client.post(
+            '/api/activate-admin/activate/',
+            {
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token, 'username': 'x',  # trop court
+                'password': 'MonMotDePasse2026!', 'password_confirm': 'MonMotDePasse2026!',
+            },
+            format='json',
+        )
+        self.assertEqual(activate_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_activation_rejects_username_already_used_in_same_tenant(self):
+        first = self._post({
+            'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'A', 'prenom': 'A', 'email': 'dup-username-a@example.test',
+        })
+        self.client.post(
+            '/api/activate-admin/activate/',
+            {
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': first.data['activation_token'], 'username': 'shared.name',
+                'password': 'MonMotDePasse2026!', 'password_confirm': 'MonMotDePasse2026!',
+            },
+            format='json',
+        )
+
+        second = self._post({
+            'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'B', 'prenom': 'B', 'email': 'dup-username-b@example.test',
+        })
+        second_activate = self.client.post(
+            '/api/activate-admin/activate/',
+            {
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': second.data['activation_token'], 'username': 'shared.name',
+                'password': 'MonMotDePasse2026!', 'password_confirm': 'MonMotDePasse2026!',
+            },
+            format='json',
+        )
+        self.assertEqual(second_activate.status_code, status.HTTP_409_CONFLICT)
 
     def test_duplicate_email_in_same_tenant_returns_409(self):
         self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'email': 'dup@example.test'})

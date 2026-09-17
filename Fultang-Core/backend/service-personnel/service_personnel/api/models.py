@@ -182,6 +182,25 @@ class Admin(Personnel):
     # Personnel (champ propre à `Admin`, pas à la base abstraite).
     compte_active = models.BooleanField(default=True)
 
+    # Défini par l'administrateur lui-même pendant l'activation
+    # (AdminActivationCompleteView) — ne remplace PAS `email` comme
+    # identifiant de connexion (AuthVerifyView continue de matcher par
+    # email, inchangé) : uniquement une donnée de profil supplémentaire,
+    # affichée/utilisable par l'administrateur. `null=True` : aucun compte
+    # Admin existant (créé avant ce champ, ou par un autre chemin que
+    # l'onboarding) n'est affecté — la contrainte d'unicité ci-dessous
+    # n'empêche jamais deux `NULL` de coexister (comportement standard
+    # Postgres, déjà exploité ailleurs dans ce modèle pour `tenant_id`).
+    username = models.CharField(max_length=150, blank=True, null=True)
+
+    class Meta(Personnel.Meta):
+        # Étend (jamais ne remplace) les contraintes de la base abstraite
+        # (email/matricule uniques par tenant) — ajoute la même règle pour
+        # `username`, propre à Admin.
+        constraints = Personnel.Meta.constraints + [
+            models.UniqueConstraint(fields=['tenant_id', 'username'], name='api_admin_unique_username_per_tenant'),
+        ]
+
     def creerCompteUtilisateur(self):
         pass
 

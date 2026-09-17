@@ -1,3 +1,4 @@
+import re
 import secrets
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -1034,19 +1035,36 @@ class AdminActivationCompleteView(APIView):
     service (`change_password`/`reset_password` n'en imposent aucune) —
     seul un minimum de 8 caractères est imposé ici, à défaut d'une
     politique existante à réutiliser (ajout minimal, documenté comme tel).
+
+    Depuis les corrections finales : accepte aussi `username`, défini par
+    l'administrateur — enregistré sur CE MÊME compte Admin (`Admin.username`),
+    jamais un second compte. Ne remplace PAS `email` comme identifiant de
+    connexion (AuthVerifyView continue de matcher par email, inchangé) :
+    uniquement une donnée de profil. Aucune règle de validation de nom
+    d'utilisateur n'existait ailleurs dans ce service — règle minimale
+    ajoutée ici (3 à 150 caractères, lettres/chiffres/`. _ -`), unique par
+    tenant (contrainte DB `api_admin_unique_username_per_tenant`).
     """
     authentication_classes = []
     permission_classes = [AllowAny]
 
+    _USERNAME_RE = re.compile(r'^[A-Za-z0-9_.\-]{3,150}$')
+
     def post(self, request):
         tenant_id = request.data.get('tenant_id')
         token = request.data.get('token')
+        username = (request.data.get('username') or '').strip()
         password = request.data.get('password')
         password_confirm = request.data.get('password_confirm')
 
-        if not tenant_id or not token or not password or not password_confirm:
+        if not tenant_id or not token or not username or not password or not password_confirm:
             return Response(
-                {'detail': "Les champs 'tenant_id', 'token', 'password' et 'password_confirm' sont requis."},
+                {'detail': "Les champs 'tenant_id', 'token', 'username', 'password' et 'password_confirm' sont requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not self._USERNAME_RE.match(username):
+            return Response(
+                {'detail': "Le nom d'utilisateur doit contenir entre 3 et 150 caractères (lettres, chiffres, points, tirets, underscores)."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if password != password_confirm:
@@ -1060,14 +1078,59 @@ class AdminActivationCompleteView(APIView):
             return error_response
 
         admin = activation_token.admin
+
+        if Admin.objects.filter(tenant_id=tenant_id, username=username).exclude(pk=admin.pk).exists():
+            return Response(
+                {'detail': "Ce nom d'utilisateur est déjà utilisé dans cet établissement."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        admin.username = username
         admin.mot_de_passe = make_password(password)
         admin.compte_active = True
-        admin.save(update_fields=['mot_de_passe', 'compte_active'])
+        try:
+            admin.save(update_fields=['username', 'mot_de_passe', 'compte_active'])
+        except IntegrityError:
+            return Response(
+                {'detail': "Ce nom d'utilisateur est déjà utilisé dans cet établissement."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         activation_token.used_at = timezone.now()
         activation_token.save(update_fields=['used_at'])
 
         return Response({'success': True, 'email': admin.email})
+
+
+class TenantAdminEmailsView(APIView):
+    """
+    GET /api/internal/tenant-admin-emails/?tenant_id=<uuid> — Notifications
+    email des opérations majeures (mission dédiée) : permet à tenant-service
+    de savoir à QUI notifier une suspension/réactivation d'établissement ou
+    une activation/désactivation de service, en réutilisant la relation
+    DÉJÀ existante entre un tenant et ses comptes Admin — aucun nouveau
+    champ, aucune nouvelle adresse stockée ailleurs.
+
+    Réservé à la communication interne (même protection `IsInternalService`
+    que les autres endpoints internes de ce fichier). Retourne TOUS les
+    comptes Admin du tenant (`compte_active` ou non — un compte encore en
+    attente d'activation reste un administrateur légitime de l'établissement)
+    plutôt qu'un seul, pour ne jamais manquer un destinataire légitime si
+    plusieurs administrateurs existent. Liste vide si aucun Admin n'existe
+    encore (jamais une erreur : c'est un état normal juste après la
+    création d'un tenant, avant `provision-admin`).
+    """
+    authentication_classes = []
+    permission_classes = [IsInternalService]
+
+    def get(self, request):
+        tenant_id = request.query_params.get('tenant_id')
+        if not tenant_id:
+            return Response({'detail': "Le paramètre 'tenant_id' est requis."}, status=status.HTTP_400_BAD_REQUEST)
+
+        set_tenant_context(tenant_id)
+        emails = list(Admin.objects.filter(tenant_id=tenant_id).values_list('email', flat=True))
+        return Response({'emails': emails})
 
 
 class FunctionalServiceInvalidateView(APIView):
