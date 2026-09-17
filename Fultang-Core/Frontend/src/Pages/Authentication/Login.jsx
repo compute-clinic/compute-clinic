@@ -9,7 +9,12 @@ import { useAuthentication } from "../../Utils/Provider.jsx";
 import { ChangePasswordModal } from "../../GlobalComponents/ChangePasswordModal.jsx";
 import { useTranslation } from "react-i18next";
 import { APP_NAME } from "../../constants/branding.js";
+import { usePublicTenantResolution } from "../../hooks/usePublicTenantResolution.js";
+import { EstablishmentNotFoundScreen } from "../../GlobalComponents/EstablishmentNotFoundScreen.jsx";
+import { PublicTenantIdentity } from "../../GlobalComponents/PublicTenantIdentity.jsx";
+import { Loading } from "../../GlobalComponents/Loading.jsx";
 export function LoginPage() {
+    const { checking, blocked, tenant } = usePublicTenantResolution();
 
 
     const [username, setUsername] = useState("");
@@ -124,8 +129,11 @@ export function LoginPage() {
         }
     }
 
-
-
+    // Accès tenant/landing (Cycle de vie du tenant) : même garde que la
+    // landing (voir LandingPage.jsx) — un sous-domaine tenant inexistant ne
+    // doit jamais afficher le formulaire de connexion.
+    if (checking) return <Loading />;
+    if (blocked) return <EstablishmentNotFoundScreen />;
 
     return (
         <>
@@ -137,9 +145,15 @@ export function LoginPage() {
                     backgroundRepeat: "no-repeat",
                 }}
             >
-                <p onClick={() => navigate("/")} className="text-3xl text-white font-bold mt-6 ml-8 cursor-pointer">
-                    {APP_NAME}
-                </p>
+                {tenant ? (
+                    <div onClick={() => navigate("/")} className="mt-6 ml-8 cursor-pointer">
+                        <PublicTenantIdentity tenant={tenant} variant="dark" />
+                    </div>
+                ) : (
+                    <p onClick={() => navigate("/")} className="text-3xl text-white font-bold mt-6 ml-8 cursor-pointer">
+                        {APP_NAME}
+                    </p>
+                )}
                 <div className="flex-1 flex flex-col items-center justify-center">
                     <div className="flex ml-56 mt-28 w-[1400px] h-[480px]">
                         <div className="flex flex-col w-[620px]">

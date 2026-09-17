@@ -1,11 +1,12 @@
+import secrets
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from .models import (
-    Service, Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, 
-    ComptableFinancier, ComptableMatiere, Caissier, Laborantin, 
-    Pharmacien, Directeur, Admin, Prime
+    Service, Medecin, MedecinGeneraliste, Infirmiere, Receptionniste,
+    ComptableFinancier, ComptableMatiere, Caissier, Laborantin,
+    Pharmacien, Directeur, Admin, Prime, AdminActivationToken
 )
 from .serializers import (
     ServiceSerializer, MedecinSerializer, MedecinGeneralisteSerializer, InfirmiereSerializer, ReceptionnisteSerializer,
@@ -16,7 +17,7 @@ from rest_framework.views import APIView
 from rest_framework import status
 from django.contrib.auth.hashers import check_password
 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from .permissions import HasFunctionalServiceEnabled, IsInternalService
 from .tenant_routing.context import get_current_tenant_context, set_tenant_context
@@ -399,6 +400,18 @@ class AuthVerifyView(APIView):
                 continue
 
         if user is not None and check_password(password, user.mot_de_passe):
+            # Onboarding admin sécurisé : un compte Admin créé via
+            # CreateFirstAdminView (`compte_active=False`) ne doit jamais
+            # pouvoir se connecter avant son activation — même si son mot
+            # de passe de remplacement (aléatoire, 32 octets) était
+            # deviné. `getattr(..., True)` : aucun autre type de Personnel
+            # ne porte ce champ, donc ce contrôle ne change rien pour eux.
+            if getattr(user, 'compte_active', True) is False:
+                return Response(
+                    {'detail': "Ce compte est en attente d'activation. Utilisez le lien reçu par email."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             # Rôles canoniques pour les comptes de démo (évite les doublons multi-tables)
             CANONICAL_ROLES = {
                 'i.njoya@fultang.local': 'ComptableFinancier',
@@ -851,15 +864,22 @@ class CreateFirstAdminView(APIView):
     la Gateway) — tenant-service l'appelle juste après que sa base
     PERSONNEL est devenue ACTIVE.
 
-    Ne réutilise AUCUN nouveau mécanisme d'authentification : le compte
-    créé est un `Admin` ordinaire (voir models.py), avec un mot de passe
-    temporaire hashé exactement comme tout autre compte (`make_password`),
-    généré par la même fonction que `reset_password`
-    (`generate_temporary_password`). Champs obligatoires du modèle
-    `Personnel` non fournis par l'appelant (date de naissance, adresse,
-    contact, date d'embauche) reçoivent une valeur de départ neutre —
-    l'administrateur les complète lui-même une fois connecté (§4 de la
-    mission : "en restant simple").
+    Onboarding admin sécurisé (Cycle de vie du tenant) : ce compte est
+    créé `compte_active=False` — AUCUN mot de passe temporaire n'est plus
+    généré ni renvoyé ici (l'ancien `generate_temporary_password()`
+    n'était de toute façon pas cryptographiquement sûr : 900 valeurs
+    possibles). À la place, un `AdminActivationToken` à usage unique est
+    émis (voir models.py) et renvoyé à tenant-service, seul appelant de
+    cet endpoint interne — c'est lui qui compose et envoie l'email
+    d'activation (il connaît l'URL publique de l'établissement, pas ce
+    service). Le compte Admin lui-même, son tenant et son rôle existent
+    dès cet appel exactement comme avant — seule la définition du mot de
+    passe est différée jusqu'à l'activation.
+
+    Champs obligatoires du modèle `Personnel` non fournis par l'appelant
+    (date de naissance, adresse, contact, date d'embauche) reçoivent une
+    valeur de départ neutre — l'administrateur les complète lui-même une
+    fois connecté (§4 de la mission : "en restant simple").
     """
     authentication_classes = []
     permission_classes = [IsInternalService]
@@ -878,7 +898,12 @@ class CreateFirstAdminView(APIView):
 
         set_tenant_context(tenant_id)
 
-        temporary_password = generate_temporary_password()
+        # Mot de passe de remplissage temporaire pour la contrainte NOT NULL
+        # du champ — jamais communiqué à quiconque, jamais utilisable :
+        # `compte_active=False` bloque toute connexion (voir AuthVerifyView)
+        # tant que l'admin n'a pas défini son propre mot de passe via le
+        # lien d'activation, qui écrase ce hash avant toute utilisation.
+        placeholder_password = secrets.token_urlsafe(32)
         today = timezone.now().date()
 
         try:
@@ -893,7 +918,8 @@ class CreateFirstAdminView(APIView):
                 matricule=generate_matricule('admin'),
                 date_embauche=today,
                 statut='Actif',
-                mot_de_passe=make_password(temporary_password),
+                mot_de_passe=make_password(placeholder_password),
+                compte_active=False,
             )
         except IntegrityError:
             return Response(
@@ -901,11 +927,147 @@ class CreateFirstAdminView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        activation_token = AdminActivationToken.objects.create(admin=admin, tenant_id=tenant_id)
+
         return Response({
             'id': str(admin.id_personnel),
             'email': admin.email,
-            'temporary_password': temporary_password,
+            'activation_token': activation_token.token,
+            'activation_expires_at': activation_token.expires_at.isoformat(),
         }, status=status.HTTP_201_CREATED)
+
+
+def _resolve_activation_token(tenant_id, token):
+    """
+    Résolution + vérifications communes à `AdminActivationVerifyView` et
+    `AdminActivationCompleteView` (Cycle de vie du tenant — onboarding
+    admin sécurisé, §4.5/§4.9/§4.10/§4.12 de la mission) : une seule
+    implémentation des règles "token inconnu", "tenant incohérent",
+    "déjà utilisé", "expiré", "compte déjà actif".
+
+    Retourne `(activation_token, error_response)` — exactement l'un des
+    deux est `None`. N'écrit jamais rien (lecture seule) : à l'appelant
+    d'appliquer l'activation elle-même après ce contrôle.
+    """
+    try:
+        activation_token = AdminActivationToken.objects.select_related('admin').get(token=token)
+    except AdminActivationToken.DoesNotExist:
+        return None, Response({'detail': "Ce lien d'activation est invalide."}, status=status.HTTP_404_NOT_FOUND)
+
+    # Isolation multi-tenant stricte (§4.12) : un token émis pour un tenant
+    # ne doit JAMAIS être utilisable en se présentant avec un autre
+    # tenant_id — jamais une confiance implicite dans la seule unicité du
+    # token. Corps de réponse identique au cas "token inconnu" : ne révèle
+    # jamais qu'un token existe pour un autre tenant.
+    if str(activation_token.tenant_id) != str(tenant_id):
+        return None, Response({'detail': "Ce lien d'activation est invalide."}, status=status.HTTP_404_NOT_FOUND)
+
+    if activation_token.is_used or activation_token.admin.compte_active:
+        return None, Response(
+            {'detail': "Ce lien d'activation a déjà été utilisé.", 'error_type': 'ACTIVATION_LINK_USED'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    if activation_token.is_expired:
+        return None, Response(
+            {'detail': "Ce lien d'activation a expiré.", 'error_type': 'ACTIVATION_LINK_EXPIRED'},
+            status=status.HTTP_410_GONE,
+        )
+
+    return activation_token, None
+
+
+class AdminActivationVerifyView(APIView):
+    """
+    GET /api/activate-admin/verify/?tenant_id=<uuid>&token=<token> —
+    Cycle de vie du tenant, onboarding admin sécurisé (§4.5 de la
+    mission).
+
+    SEUL endpoint, avec `AdminActivationCompleteView`, accessible sans
+    authentification pour cette fonctionnalité — appelé par la page
+    d'activation AVANT tout rendu, pour savoir si le lien est valide et
+    afficher l'email du compte concerné. Ne modifie jamais rien (lecture
+    seule) — voir `AdminActivationCompleteView` pour l'activation
+    elle-même.
+
+    `tenant_id` est fourni explicitement par le frontend (obtenu via
+    `GET /tenants/tenants/public-info/`, voir tenant-service) : la
+    Gateway ne forwarde le tenant résolu par hostname que pour les
+    requêtes porteuses d'un JWT (voir api-gateway/app/main.py,
+    `_build_user_headers`) — un appel anonyme comme celui-ci n'en profite
+    pas, donc `tenant_id` doit être explicite pour que le routage
+    multi-base (`TenantDatabaseRouter`) sache quelle base interroger.
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        tenant_id = request.query_params.get('tenant_id')
+        token = request.query_params.get('token')
+        if not tenant_id or not token:
+            return Response(
+                {'detail': "Les paramètres 'tenant_id' et 'token' sont requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        set_tenant_context(tenant_id)
+        activation_token, error_response = _resolve_activation_token(tenant_id, token)
+        if error_response is not None:
+            return error_response
+
+        admin = activation_token.admin
+        return Response({'email': admin.email, 'nom': admin.nom, 'prenom': admin.prenom})
+
+
+class AdminActivationCompleteView(APIView):
+    """
+    POST /api/activate-admin/activate/ — Cycle de vie du tenant,
+    onboarding admin sécurisé (§4.6/§4.7 de la mission).
+
+    Définit le mot de passe du compte Admin déjà créé (ne crée JAMAIS de
+    nouveau compte, ne modifie ni son rôle ni son tenant), active le
+    compte (`compte_active=True`) et invalide définitivement le token
+    (`used_at`) — le tout de façon atomique. Aucun mot de passe n'est
+    jamais journalisé, renvoyé ou stocké en clair.
+
+    Aucune règle de complexité de mot de passe n'existe ailleurs dans ce
+    service (`change_password`/`reset_password` n'en imposent aucune) —
+    seul un minimum de 8 caractères est imposé ici, à défaut d'une
+    politique existante à réutiliser (ajout minimal, documenté comme tel).
+    """
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        tenant_id = request.data.get('tenant_id')
+        token = request.data.get('token')
+        password = request.data.get('password')
+        password_confirm = request.data.get('password_confirm')
+
+        if not tenant_id or not token or not password or not password_confirm:
+            return Response(
+                {'detail': "Les champs 'tenant_id', 'token', 'password' et 'password_confirm' sont requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if password != password_confirm:
+            return Response({'detail': "Les mots de passe ne correspondent pas."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(password) < 8:
+            return Response({'detail': "Le mot de passe doit contenir au moins 8 caractères."}, status=status.HTTP_400_BAD_REQUEST)
+
+        set_tenant_context(tenant_id)
+        activation_token, error_response = _resolve_activation_token(tenant_id, token)
+        if error_response is not None:
+            return error_response
+
+        admin = activation_token.admin
+        admin.mot_de_passe = make_password(password)
+        admin.compte_active = True
+        admin.save(update_fields=['mot_de_passe', 'compte_active'])
+
+        activation_token.used_at = timezone.now()
+        activation_token.save(update_fields=['used_at'])
+
+        return Response({'success': True, 'email': admin.email})
 
 
 class FunctionalServiceInvalidateView(APIView):

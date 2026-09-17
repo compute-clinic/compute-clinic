@@ -9,6 +9,7 @@ import { AppRoutesPaths } from "./appRouterPaths.js";
 
 export function AppRoute() {
     const LoginPage = React.lazy(async () => ({ default: (await import("../Pages/Authentication/Login.jsx")).LoginPage }));
+    const AdminActivationPage = React.lazy(async () => ({ default: (await import("../Pages/Authentication/AdminActivation.jsx")).AdminActivationPage }));
     const PlatformAdminLoginPage = React.lazy(async () => ({ default: (await import("../Pages/PlatformAdmin/PlatformAdminLogin.jsx")).PlatformAdminLogin }));
     const PlatformAdminDashboardPage = React.lazy(async () => ({ default: (await import("../Pages/PlatformAdmin/PlatformAdminDashboard.jsx")).PlatformAdminDashboard }));
     const PlatformAdminEstablishmentsPage = React.lazy(async () => ({ default: (await import("../Pages/PlatformAdmin/Establishments/EstablishmentsListPage.jsx")).EstablishmentsListPage }));
@@ -142,6 +143,7 @@ export function AppRoute() {
                 <Route path={AppRoutesPaths.welcomePage} element={<LandingPage />} />
                 <Route path={AppRoutesPaths.newLandingPage} element={<LandingPageV2 />} />
                 <Route path={AppRoutesPaths.loginPage} element={<LoginPage />} />
+                <Route path={AppRoutesPaths.adminActivationPage} element={<AdminActivationPage />} />
                 <Route path={AppRoutesPaths.forgottenPasswordPage} element={<ForgottenPage />} />
                 <Route path={AppRoutesPaths.platformAdminLoginPage} element={<PlatformAdminLoginPage />} />
                 <Route path={AppRoutesPaths.platformAdminDashboardPage} element={<PlatformAdminDashboardPage />} />

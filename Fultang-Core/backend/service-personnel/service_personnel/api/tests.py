@@ -767,26 +767,85 @@ class CreateFirstAdminEndpointTests(APITestCase):
         response = self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont'})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_successful_creation_returns_temporary_password(self):
+    def test_successful_creation_returns_activation_token(self):
+        """Onboarding admin sécurisé : plus de mot de passe en clair, un token d'activation à la place."""
         response = self._post({
             'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'prenom': 'Jean', 'email': 'jean.dupont@example.test',
         })
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['email'], 'jean.dupont@example.test')
-        self.assertTrue(response.data['temporary_password'])
+        self.assertTrue(response.data['activation_token'])
+        self.assertTrue(response.data['activation_expires_at'])
+        self.assertNotIn('temporary_password', response.data)
 
         created = Admin.objects.using('default').get(email='jean.dupont@example.test')
         self.assertEqual(str(created.tenant_id), CREATE_ADMIN_TENANT)
-        self.assertNotEqual(created.mot_de_passe, response.data['temporary_password'])  # hashé, jamais en clair
+        self.assertFalse(created.compte_active)  # en attente d'activation, pas immédiatement utilisable
 
-    def test_created_admin_can_authenticate_with_the_temporary_password(self):
-        """Le compte créé est un compte RÉELLEMENT utilisable, pas seulement une ligne en base."""
-        from django.contrib.auth.hashers import check_password
+    def test_created_admin_cannot_authenticate_before_activation(self):
+        """Le compte créé (compte_active=False) ne doit permettre AUCUNE connexion avant activation."""
         response = self._post({
-            'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'prenom': 'Jean', 'email': 'auth-check@example.test',
+            'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'prenom': 'Jean', 'email': 'not-yet-active@example.test',
         })
-        created = Admin.objects.using('default').get(email='auth-check@example.test')
-        self.assertTrue(check_password(response.data['temporary_password'], created.mot_de_passe))
+        activation_token = response.data['activation_token']
+
+        activate_response = self.client.post(
+            '/api/activate-admin/activate/',
+            {
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token,
+                'password': 'MonMotDePasse2026!', 'password_confirm': 'WRONG-not-matching',
+            },
+            format='json',
+        )
+        self.assertEqual(activate_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        login_response = self.client.post(
+            '/api/auth/verify/',
+            {'email': 'not-yet-active@example.test', 'password': 'anything', 'tenant_id': CREATE_ADMIN_TENANT},
+            format='json',
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_admin_can_authenticate_after_completing_activation(self):
+        """Parcours complet : création -> activation -> authentification normale avec le mot de passe choisi."""
+        response = self._post({
+            'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'prenom': 'Jean', 'email': 'activates-ok@example.test',
+        })
+        activation_token = response.data['activation_token']
+
+        activate_response = self.client.post(
+            '/api/activate-admin/activate/',
+            {
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token,
+                'password': 'MonMotDePasse2026!', 'password_confirm': 'MonMotDePasse2026!',
+            },
+            format='json',
+        )
+        self.assertEqual(activate_response.status_code, status.HTTP_200_OK)
+
+        created = Admin.objects.using('default').get(email='activates-ok@example.test')
+        self.assertTrue(created.compte_active)
+
+        login_response = self.client.post(
+            '/api/auth/verify/',
+            {
+                'email': 'activates-ok@example.test', 'password': 'MonMotDePasse2026!',
+                'tenant_id': CREATE_ADMIN_TENANT,
+            },
+            format='json',
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+        # Le token est désormais invalidé : une seconde activation doit être refusée.
+        second_attempt = self.client.post(
+            '/api/activate-admin/activate/',
+            {
+                'tenant_id': CREATE_ADMIN_TENANT, 'token': activation_token,
+                'password': 'AutreMotDePasse2026!', 'password_confirm': 'AutreMotDePasse2026!',
+            },
+            format='json',
+        )
+        self.assertEqual(second_attempt.status_code, status.HTTP_409_CONFLICT)
 
     def test_duplicate_email_in_same_tenant_returns_409(self):
         self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'email': 'dup@example.test'})

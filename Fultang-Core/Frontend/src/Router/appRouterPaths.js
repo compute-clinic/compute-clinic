@@ -12,6 +12,10 @@ export const AppRoutesPaths = {
     newLandingPage: "/nouvelle-landing",
     loginPage: "/login",
     forgottenPasswordPage: "/forgotten-password",
+    // Onboarding admin sécurisé (Cycle de vie du tenant) — lien à usage
+    // unique envoyé par email, jamais un mot de passe. Voir
+    // Pages/Authentication/AdminActivation.jsx.
+    adminActivationPage: "/activation-admin",
 
     // Platform Admin (back-office plateforme, distinct des tenants)
     platformAdminLoginPage: "/platform-admin/login",

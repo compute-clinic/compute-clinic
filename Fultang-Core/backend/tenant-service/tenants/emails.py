@@ -1,22 +1,20 @@
 """
-emails.py — Email d'accès du compte administrateur du tenant (Cycle de
-vie du tenant, Phase 2).
+emails.py — Emails du compte administrateur du tenant (Cycle de vie du
+tenant, Phase 2 puis onboarding admin sécurisé).
 
-Aucun système d'envoi n'existait nulle part dans FullTang avant cette
-phase (audit complet du dépôt — aucun `send_mail`, aucun SMTP configuré,
-voir MULTITENANT_ARCHITECTURE.md). Ce module utilise l'API Django
-standard (`django.core.mail.send_mail`), backée par `EMAIL_BACKEND`
-(voir config/settings.py — backend console en développement local, un
-vrai SMTP se branche uniquement par variable d'environnement, jamais en
-dur ici).
+Aucun système d'envoi n'existait nulle part dans FullTang avant la Phase
+2 (audit complet du dépôt — aucun `send_mail`, aucun SMTP configuré, voir
+MULTITENANT_ARCHITECTURE.md). Ce module utilise l'API Django standard
+(`django.core.mail.send_mail`), backée par `EMAIL_BACKEND` (voir
+config/settings.py — backend console en développement local, un vrai
+SMTP se branche uniquement par variable d'environnement, jamais en dur
+ici).
 
-Ne réutilise PAS un mot de passe permanent : le mot de passe transmis
-est explicitement temporaire (même mécanisme de génération que
-`service-personnel/api/views.py::reset_password`, déjà existant) — le
-destinataire est invité à le changer via le mécanisme existant
-"mot de passe oublié", seul mécanisme de changement de mot de passe
-self-service actuellement disponible dans FullTang (aucun nouveau
-système d'authentification introduit ici).
+Onboarding admin sécurisé : `send_tenant_admin_welcome_email` ne transmet
+PLUS AUCUN mot de passe (ancien comportement, Phase 2) — uniquement un
+lien d'activation à usage unique (`AdminActivationToken`, voir
+service-personnel/api/models.py). L'administrateur définit lui-même son
+mot de passe en l'ouvrant.
 """
 import logging
 
@@ -27,10 +25,10 @@ logger = logging.getLogger("tenants.emails")
 
 
 def send_tenant_admin_welcome_email(
-    *, tenant_name: str, establishment_url: str, admin_email: str, temporary_password: str,
+    *, tenant_name: str, establishment_url: str, admin_email: str, activation_url: str,
 ) -> None:
     """
-    Envoie l'email d'accès au compte administrateur nouvellement créé.
+    Envoie l'email d'activation au compte administrateur nouvellement créé.
 
     Ne capture AUCUNE exception : un échec d'envoi doit remonter tel
     quel à l'appelant (`TenantViewSet.provision_admin`), qui le reporte
@@ -38,20 +36,19 @@ def send_tenant_admin_welcome_email(
     "email envoyé" affiché sans que l'opération d'envoi ait réellement
     été déclenchée avec succès.
     """
-    subject = f"Accès à votre établissement ComputeClinic — {tenant_name}"
+    subject = f"Activez votre compte ComputeClinic — {tenant_name}"
     message = (
         f"Bonjour,\n\n"
         f"Votre établissement « {tenant_name} » est prêt sur ComputeClinic.\n\n"
         f"Adresse de votre établissement :\n{establishment_url}\n\n"
-        f"Votre compte administrateur :\n"
-        f"  Identifiant (email) : {admin_email}\n"
-        f"  Mot de passe temporaire : {temporary_password}\n\n"
-        "Merci de vous connecter puis de changer ce mot de passe dès que "
-        "possible depuis l'écran « Mot de passe oublié ».\n\n"
+        f"Pour accéder à votre espace d'administration, définissez vos "
+        f"identifiants en ouvrant le lien ci-dessous :\n{activation_url}\n\n"
+        "Ce lien est personnel, à usage unique, et expire après un délai "
+        "limité.\n\n"
         "— L'équipe ComputeClinic"
     )
     send_mail(
         subject, message, settings.DEFAULT_FROM_EMAIL, [admin_email],
         fail_silently=False,
     )
-    logger.info("Email d'accès envoyé à %s pour l'établissement « %s ».", admin_email, tenant_name)
+    logger.info("Email d'activation envoyé à %s pour l'établissement « %s ».", admin_email, tenant_name)

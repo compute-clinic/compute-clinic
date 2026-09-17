@@ -18,6 +18,17 @@ from .models import (
 TENANT_PROFILE_FIELDS = ['address', 'phone', 'email', 'logo_url']
 
 
+def _resolve_logo_display_url(tenant: Tenant) -> str:
+    """
+    Partagé par `TenantSerializer` et `TenantPublicInfoSerializer` — une
+    seule implémentation de la règle "fichier uploadé prime sur l'URL
+    externe manuelle" (voir docstring historique ci-dessous, inchangée).
+    """
+    if tenant.logo:
+        return f"/tenants/media/{tenant.logo.name}"
+    return tenant.logo_url or ''
+
+
 class TenantSerializer(serializers.ModelSerializer):
     """Représentation d'un tenant pour la lecture et la création.
 
@@ -51,9 +62,7 @@ class TenantSerializer(serializers.ModelSerializer):
         uploadé (`logo`) prime toujours sur l'URL externe manuelle
         (`logo_url`) — voir Tenant.logo.
         """
-        if obj.logo:
-            return f"/tenants/media/{obj.logo.name}"
-        return obj.logo_url or ''
+        return _resolve_logo_display_url(obj)
 
     def get_establishment_url(self, obj) -> str:
         """
@@ -125,6 +134,29 @@ class TenantResolutionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = ['id', 'identifier', 'status', 'allow_clinical_agent_export']
+
+
+class TenantPublicInfoSerializer(serializers.ModelSerializer):
+    """
+    Réponse de GET /tenants/tenants/public-info/ — SEUL endpoint de ce
+    module accessible sans authentification (AllowAny), voir la vue.
+
+    Expose STRICTEMENT le minimum nécessaire à la landing/au login publics
+    pour afficher l'identité de l'établissement (Cycle de vie du tenant —
+    accès tenant/landing) : jamais `id`, `status`, `email`/`phone`/
+    `adresse`, ni aucun champ de configuration — un visiteur non
+    authentifié ne doit jamais apprendre plus que ce qu'il verrait déjà en
+    visitant la landing existante.
+    """
+
+    logo_display_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Tenant
+        fields = ['name', 'identifier', 'logo_display_url']
+
+    def get_logo_display_url(self, obj) -> str:
+        return _resolve_logo_display_url(obj)
 
 
 class PlatformServiceSerializer(serializers.ModelSerializer):

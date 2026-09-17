@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import { Save } from "lucide-react";
-import { getTenantFunctionalServices, bulkSetTenantFunctionalServices } from "../../../services/platformAdminApi.js";
+import { getTenantFunctionalServices, bulkSetTenantFunctionalServicesConfirmed } from "../../../services/platformAdminApi.js";
 import { ServicesChecklist } from "../CreateTenant/ServicesChecklist.jsx";
 import { ConfirmationModal } from "../../Modals/ConfirmAction.Modal.jsx";
 import { useFeedback } from "../../../contexts/FeedbackContext.jsx";
@@ -82,6 +82,15 @@ export function ServicesConfigSection({ tenantId }) {
 
     const toEnableNames = pendingChanges.filter((c) => c.enabled).map((c) => c.name);
     const toDisableNames = pendingChanges.filter((c) => !c.enabled).map((c) => c.name);
+    // Double confirmation renforcée (mission dédiée) : valeur attendue =
+    // codes désactivés triés, joints par une virgule — EXACTEMENT ce que
+    // le backend revérifie (bulk_set_functional_services_confirmed). Un
+    // seul service désactivé -> juste son code, comme l'exemple de la
+    // mission ("COMPTA_FINANCIERE"). `null` (pas de désactivation dans ce
+    // lot) : aucune saisie manuelle exigée, cohérent avec la logique
+    // métier inchangée (activer n'est jamais destructif).
+    const disabledCodes = pendingChanges.filter((c) => !c.enabled).map((c) => c.code).sort();
+    const expectedConfirmation = disabledCodes.length > 0 ? disabledCodes.join(',') : null;
 
     /**
      * Second pop-up (Phase 3) : textes exacts imposés par la mission pour
@@ -125,9 +134,10 @@ export function ServicesConfigSection({ tenantId }) {
     const handleConfirm = async () => {
         setSaving(true);
         try {
-            const updated = await bulkSetTenantFunctionalServices(
+            const updated = await bulkSetTenantFunctionalServicesConfirmed(
                 tenantId,
-                pendingChanges.map(({ code, enabled }) => ({ code, enabled }))
+                pendingChanges.map(({ code, enabled }) => ({ code, enabled })),
+                expectedConfirmation,
             );
             const list = Array.isArray(updated) ? updated : draftServices;
             setSavedServices(list);
@@ -207,6 +217,7 @@ export function ServicesConfigSection({ tenantId }) {
                 message={secondConfirmCopy.message}
                 confirmText={secondConfirmCopy.confirmText}
                 cancelText="Annuler"
+                requireTypedConfirmation={expectedConfirmation}
             />
         </div>
     );

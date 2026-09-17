@@ -136,21 +136,31 @@ export function CustomDashboard({ children, linkList, requiredRole, brandLabel =
     }
 
     return (
-        <div className="flex h-screen">
+        // Responsive Platform Admin (mission dédiée) : en dessous de `md`,
+        // la sidebar (auparavant fixe à 18% de largeur, illisible sur mobile
+        // — icônes/libellés qui se chevauchent, colonne de contenu réduite à
+        // quelques dizaines de pixels) devient un bloc pleine largeur empilé
+        // AU-DESSUS du contenu, sans position fixe — aucun nouveau
+        // comportement JS (pas de bouton "burger", pas d'état de repli) :
+        // uniquement des breakpoints Tailwind, cohérent avec la consigne de
+        // ne pas changer la logique fonctionnelle. À partir de `md`,
+        // comportement strictement identique à avant (sidebar fixe à 18%,
+        // contenu décalé de 17.5%) — aucune régression desktop.
+        <div className="flex flex-col md:flex-row min-h-screen md:h-screen">
             <div
-                className="w-[18%] fixed h-screen bg-gradient-to-t from-primary-start to-primary-end flex flex-col overflow-y-auto scrollbar">
+                className="w-full md:w-[18%] md:fixed h-auto md:h-screen bg-gradient-to-t from-primary-start to-primary-end flex flex-col overflow-y-auto scrollbar">
                 {showTenantIdentity ? (
                     <TenantBrandHeader />
                 ) : (
-                    <h1 className="text-3xl font-bold ml-6 mb-10 mt-7 text-white">
+                    <h1 className="text-2xl md:text-3xl font-bold ml-6 mb-6 md:mb-10 mt-7 text-white">
                         {brandLabel}
                     </h1>
                 )}
-                <nav className="flex flex-col space-y-1.5 mb-2 ">
+                <nav className="flex flex-col space-y-1.5 mb-4 md:mb-2 ">
                     {linkList.map((item, index) => renderLink(item, index))}
                 </nav>
             </div>
-            <div className="flex-1 min-h-screen overflow-x-hidden ml-[17.5%]">
+            <div className="flex-1 min-h-screen overflow-x-hidden md:ml-[17.5%]">
                 {children}
             </div>
         </div>

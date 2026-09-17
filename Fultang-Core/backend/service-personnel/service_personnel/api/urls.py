@@ -6,6 +6,7 @@ from .views import (
     PharmacienViewSet, DirecteurViewSet, AdminViewSet, AuthVerifyView, PersonnelViewSet,
     PrimeViewSet, ProvisionDatabaseView, CreateFirstAdminView, FunctionalServiceInvalidateView,
     ArchiveTenantDataView, DeprovisionTenantDataView,
+    AdminActivationVerifyView, AdminActivationCompleteView,
 )
 
 router = DefaultRouter()
@@ -28,6 +29,8 @@ urlpatterns = [
     path('auth/verify/', AuthVerifyView.as_view(), name='auth-verify'),
     path('internal/provision-database/', ProvisionDatabaseView.as_view(), name='internal-provision-database'),
     path('internal/create-first-admin/', CreateFirstAdminView.as_view(), name='internal-create-first-admin'),
+    path('activate-admin/verify/', AdminActivationVerifyView.as_view(), name='activate-admin-verify'),
+    path('activate-admin/activate/', AdminActivationCompleteView.as_view(), name='activate-admin-complete'),
     path(
         'internal/functional-services/invalidate/', FunctionalServiceInvalidateView.as_view(),
         name='internal-functional-services-invalidate',

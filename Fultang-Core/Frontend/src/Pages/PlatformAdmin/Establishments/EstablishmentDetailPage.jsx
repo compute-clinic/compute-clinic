@@ -136,7 +136,13 @@ export function EstablishmentDetailPage() {
     const handleStatusConfirmed = async () => {
         setStatusSaving(true);
         try {
-            const updated = await updateTenantStatus(tenantId, targetTenantStatus);
+            // La saisie manuelle (requireTypedConfirmation ci-dessous) a déjà
+            // forcé typedValue === tenant.name avant que ce bouton ne soit
+            // seulement cliquable — envoyer directement tenant.name au
+            // backend est donc strictement équivalent, sans avoir à faire
+            // remonter la valeur saisie hors de ConfirmationModal.
+            const confirmation = targetTenantStatus === "INACTIVE" ? tenant.name : undefined;
+            const updated = await updateTenantStatus(tenantId, targetTenantStatus, confirmation);
             setTenant(updated);
             // Propagation immédiate (même origine, voir tenantLifecycleBroadcast.js)
             // vers un onglet hospitalier déjà ouvert sur ce tenant — réutilise
@@ -160,7 +166,7 @@ export function EstablishmentDetailPage() {
     const handleDeleteConfirmed = async () => {
         setDeleting(true);
         try {
-            await deleteTenantPermanently(tenantId);
+            await deleteTenantPermanently(tenantId, tenant.name);
             // Idem : propagation immédiate même origine avant même la
             // redirection Platform Admin.
             broadcastTenantDeleted(tenantId);
@@ -272,6 +278,7 @@ export function EstablishmentDetailPage() {
                                 : "Cette action rétablira immédiatement l'accès à ComputeClinic pour les utilisateurs de cet établissement."}
                             confirmText={isTenantActive ? "Oui, suspendre l'établissement" : "Oui, réactiver l'établissement"}
                             cancelText="Annuler"
+                            requireTypedConfirmation={isTenantActive ? tenant.name : null}
                         />
 
                         {tenant.establishment_url && (

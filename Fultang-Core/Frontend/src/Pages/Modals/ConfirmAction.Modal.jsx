@@ -10,10 +10,18 @@ import { useState } from "react";
  * que le texte générique.
  *
  * `requireTypedConfirmation` (optionnel, Phase 4 — suppression définitive
- * de tenant) : quand renseigné (le nom exact du tenant à saisir), le bouton
- * de confirmation reste désactivé tant que la saisie ne correspond pas
- * exactement — aucun appelant existant ne passe cette prop, comportement
- * par défaut inchangé.
+ * de tenant, étendu ensuite à la suspension et à la désactivation de
+ * service) : quand renseigné (la valeur exacte attendue — nom du tenant,
+ * code du service...), le bouton de confirmation reste désactivé tant que
+ * la saisie ne correspond pas exactement — aucun appelant existant ne
+ * passe cette prop, comportement par défaut inchangé.
+ *
+ * Copier/coller/couper/glisser-déposer sont bloqués sur ce champ (§6 de la
+ * mission "double confirmation renforcée") : la valeur doit être saisie
+ * manuellement, jamais collée depuis le libellé affiché juste au-dessus.
+ * Protection frontend UNIQUEMENT — la validation réelle reste côté
+ * backend (voir chaque appelant : `confirmation_value` envoyé à l'API,
+ * jamais une confiance dans ce seul contrôle client).
  */
 export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message, confirmText = "Confirm", cancelText = "Cancel", requireTypedConfirmation = null }) {
 
@@ -40,6 +48,11 @@ export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message,
         onClose();
     };
 
+    // Bloque copier/couper/coller/glisser-déposer sur le champ de
+    // confirmation critique — l'utilisateur doit taper la valeur
+    // lui-même. Ne remplace jamais la validation backend (voir docstring).
+    const blockClipboardAndDrop = (e) => e.preventDefault();
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 backdrop-blur-sm transition-all duration-300">
             <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm mx-4 animate-fade-in-up">
@@ -59,6 +72,14 @@ export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message,
                             type="text"
                             value={typedValue}
                             onChange={(e) => setTypedValue(e.target.value)}
+                            onPaste={blockClipboardAndDrop}
+                            onCopy={blockClipboardAndDrop}
+                            onCut={blockClipboardAndDrop}
+                            onDrop={blockClipboardAndDrop}
+                            onContextMenu={blockClipboardAndDrop}
+                            autoComplete="off"
+                            autoCorrect="off"
+                            spellCheck="false"
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
                             autoFocus
                         />

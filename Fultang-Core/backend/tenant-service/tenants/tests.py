@@ -91,12 +91,38 @@ class TenantAPITests(APITestCase):
         tenant = Tenant.objects.create(name='Clinique Fultang', identifier='fultang')
         response = self.client.patch(
             f'/api/tenants/{tenant.id}/status/',
-            {'status': TenantStatus.INACTIVE},
+            {'status': TenantStatus.INACTIVE, 'confirmation': tenant.name},
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         tenant.refresh_from_db()
         self.assertEqual(tenant.status, TenantStatus.INACTIVE)
+
+    def test_update_status_to_inactive_requires_correct_confirmation(self):
+        """Double confirmation renforcée (mission dédiée) : suspension refusée sans le nom exact du tenant."""
+        tenant = Tenant.objects.create(name='Clinique Fultang', identifier='fultang')
+
+        response = self.client.patch(
+            f'/api/tenants/{tenant.id}/status/', {'status': TenantStatus.INACTIVE}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        response = self.client.patch(
+            f'/api/tenants/{tenant.id}/status/',
+            {'status': TenantStatus.INACTIVE, 'confirmation': 'Mauvais nom'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        tenant.refresh_from_db()
+        self.assertEqual(tenant.status, TenantStatus.ACTIVE)
+
+    def test_reactivation_does_not_require_confirmation(self):
+        """Une réactivation reste non destructive — aucune confirmation supplémentaire exigée."""
+        tenant = Tenant.objects.create(name='Clinique Fultang', identifier='fultang', status=TenantStatus.INACTIVE)
+        response = self.client.patch(
+            f'/api/tenants/{tenant.id}/status/', {'status': TenantStatus.ACTIVE}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_new_tenant_defaults_to_export_allowed(self):
         """§6 de la tâche : la valeur par défaut doit être True, y compris via l'API de création."""
@@ -164,7 +190,8 @@ class TenantManagementAuthorizationTests(APITestCase):
                 '/api/tenants/', {'name': 'Autre Clinique', 'identifier': 'autre-clinique'}, format='json')),
             ('retrieve', lambda: self.client.get(f'/api/tenants/{self.tenant.id}/')),
             ('update_status', lambda: self.client.patch(
-                f'/api/tenants/{self.tenant.id}/status/', {'status': TenantStatus.INACTIVE}, format='json')),
+                f'/api/tenants/{self.tenant.id}/status/',
+                {'status': TenantStatus.INACTIVE, 'confirmation': self.tenant.name}, format='json')),
         ]
 
     def test_anonymous_is_unauthorized_on_every_endpoint(self):
@@ -1533,7 +1560,7 @@ class TenantProvisionAdminEndpointTests(APITestCase):
         self._make_personnel_db_active()
         with patch(
             'tenants.views.create_first_admin',
-            return_value={'id': 'x', 'email': 'admin@example.test', 'temporary_password': 'Fultang@123'},
+            return_value={'id': 'x', 'email': 'admin@example.test', 'activation_token': 'test-activation-token'},
         ) as mock_create_admin, patch('tenants.views.send_tenant_admin_welcome_email') as mock_send_email:
             response = self._provision_admin()
 
@@ -1565,7 +1592,7 @@ class TenantProvisionAdminEndpointTests(APITestCase):
         self._make_personnel_db_active()
         with patch(
             'tenants.views.create_first_admin',
-            return_value={'id': 'x', 'email': 'admin@example.test', 'temporary_password': 'Fultang@123'},
+            return_value={'id': 'x', 'email': 'admin@example.test', 'activation_token': 'test-activation-token'},
         ), patch('tenants.views.send_tenant_admin_welcome_email', side_effect=Exception("SMTP down")):
             response = self._provision_admin()
 
@@ -1601,7 +1628,10 @@ class AdminActionLogEndpointTests(APITestCase):
         self.assertEqual(matching[0]['actor_id'], PLATFORM_ADMIN_HEADERS['HTTP_X_USER_ID'])
 
     def test_status_change_is_logged(self):
-        self.client.patch(f'/api/tenants/{self.tenant.id}/status/', {'status': TenantStatus.INACTIVE}, format='json')
+        self.client.patch(
+            f'/api/tenants/{self.tenant.id}/status/',
+            {'status': TenantStatus.INACTIVE, 'confirmation': self.tenant.name}, format='json',
+        )
         self.assertTrue(
             AdminActionLog.objects.filter(target_tenant_id=self.tenant.id, action='TENANT_STATUS_CHANGED').exists()
         )
@@ -1617,8 +1647,14 @@ class AdminActionLogEndpointTests(APITestCase):
 
     def test_filter_by_tenant(self):
         other_tenant = _make_tenant(identifier='logs-other-tenant')
-        self.client.patch(f'/api/tenants/{self.tenant.id}/status/', {'status': TenantStatus.INACTIVE}, format='json')
-        self.client.patch(f'/api/tenants/{other_tenant.id}/status/', {'status': TenantStatus.INACTIVE}, format='json')
+        self.client.patch(
+            f'/api/tenants/{self.tenant.id}/status/',
+            {'status': TenantStatus.INACTIVE, 'confirmation': self.tenant.name}, format='json',
+        )
+        self.client.patch(
+            f'/api/tenants/{other_tenant.id}/status/',
+            {'status': TenantStatus.INACTIVE, 'confirmation': other_tenant.name}, format='json',
+        )
 
         response = self.client.get('/api/admin-logs/', {'tenant': str(self.tenant.id)})
         entries = response.data['results'] if isinstance(response.data, dict) else response.data
@@ -1641,7 +1677,10 @@ class AdminActionLogEndpointTests(APITestCase):
             HTTP_X_USER_ID='platform-admin-test', HTTP_X_USER_ROLES='PLATFORM_ADMIN',
             HTTP_X_USER_EMAIL='admin@platform.example',
         )
-        self.client.patch(f'/api/tenants/{self.tenant.id}/status/', {'status': TenantStatus.INACTIVE}, format='json')
+        self.client.patch(
+            f'/api/tenants/{self.tenant.id}/status/',
+            {'status': TenantStatus.INACTIVE, 'confirmation': self.tenant.name}, format='json',
+        )
         log = AdminActionLog.objects.get(target_tenant_id=self.tenant.id, action='TENANT_STATUS_CHANGED')
         self.assertEqual(log.actor_email, 'admin@platform.example')
 

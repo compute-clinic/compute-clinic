@@ -1,5 +1,9 @@
+import secrets
 import uuid
+from datetime import timedelta
+
 from django.db import models
+from django.utils import timezone
 
 class GradeInfirmier(models.TextChoices):
     IDE = 'IDE', 'IDE'
@@ -169,8 +173,61 @@ class Directeur(Personnel):
     pass
 
 class Admin(Personnel):
+    # Onboarding sécurisé de l'administrateur (Cycle de vie du tenant) :
+    # `True` par défaut pour ne rien changer au comportement des comptes
+    # Admin existants/créés par tout autre chemin — seul le compte créé via
+    # `CreateFirstAdminView` (le tout premier admin d'un établissement) est
+    # explicitement mis à `False` tant qu'il n'a pas défini son propre mot
+    # de passe via `AdminActivationToken`. N'affecte AUCUN autre type de
+    # Personnel (champ propre à `Admin`, pas à la base abstraite).
+    compte_active = models.BooleanField(default=True)
+
     def creerCompteUtilisateur(self):
         pass
 
     def reinitialiserMotDePasse(self):
         pass
+
+
+def _generate_activation_token():
+    return secrets.token_urlsafe(32)
+
+
+def _default_activation_expiry():
+    return timezone.now() + timedelta(hours=72)
+
+
+class AdminActivationToken(models.Model):
+    """
+    Token d'activation à usage unique du tout premier compte Admin d'un
+    établissement (Cycle de vie du tenant — onboarding admin sécurisé).
+
+    Remplace l'envoi du mot de passe temporaire en clair par email :
+    l'Admin définit lui-même son mot de passe en ouvrant ce lien. Ne crée
+    JAMAIS de compte — l'Admin existe déjà (`compte_active=False`) au
+    moment où ce token est émis ; ce modèle ne fait que permettre de le
+    finaliser une seule fois.
+
+    Vit dans la MÊME base tenant que l'`Admin` qu'il protège (app `api`,
+    donc routée par `TenantDatabaseRouter` exactement comme `Admin`) —
+    la ForeignKey directe est donc sûre (jamais une relation inter-service).
+    `tenant_id` est dénormalisé depuis `admin.tenant_id` volontairement :
+    l'activation vérifie explicitement la cohérence token/admin/tenant
+    (§4.12 de la mission) plutôt que de faire confiance implicitement à la
+    relation — défense en profondeur, pas une redondance inutile.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    admin = models.ForeignKey(Admin, on_delete=models.CASCADE, related_name='activation_tokens')
+    tenant_id = models.UUIDField(db_index=True)
+    token = models.CharField(max_length=64, unique=True, default=_generate_activation_token, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(default=_default_activation_expiry)
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_used(self) -> bool:
+        return self.used_at is not None

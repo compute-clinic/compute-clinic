@@ -32,3 +32,22 @@ export const getMyTenant = async () => {
     const response = await axiosInstance.get(`${getGatewayBaseUrl()}/tenants/tenants/mine/`);
     return response.data;
 };
+
+/**
+ * Identité PUBLIQUE (nom, logo) d'un établissement par son identifiant de
+ * sous-domaine — SEUL appel de ce fichier qui fonctionne SANS session
+ * (landing/login, avant authentification). Consomme
+ * GET /tenants/tenants/public-info/?identifier=..., le seul endpoint
+ * public de tenant-service — voir tenants/views.py::TenantViewSet.public_info.
+ * Rejette (404) si aucun établissement ne correspond : l'appelant
+ * (hooks/usePublicTenantResolution.js) doit alors bloquer l'accès, jamais
+ * afficher une landing/un login générique à la place.
+ * @param {string} identifier
+ * @returns {Promise<{name: string, identifier: string, logo_display_url: string}>}
+ */
+export const getPublicTenantInfo = async (identifier) => {
+    const response = await axiosInstance.get(`${getGatewayBaseUrl()}/tenants/tenants/public-info/`, {
+        params: { identifier },
+    });
+    return response.data;
+};

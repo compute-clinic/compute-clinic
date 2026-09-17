@@ -61,12 +61,21 @@ export const updateTenant = async (id, payload) => {
 
 /**
  * Suspend ou réactive un établissement (Cycle de vie du tenant, Phase 3).
+ *
+ * `confirmation` (double confirmation renforcée) : requis par le backend
+ * UNIQUEMENT pour une suspension (`newStatus === "INACTIVE"`) — doit être
+ * le nom exact du tenant, revérifié côté serveur (jamais une confiance
+ * dans la seule saisie frontend).
  * @param {string} id
  * @param {"ACTIVE"|"INACTIVE"} newStatus
+ * @param {string} [confirmation]
  * @returns {Promise<Object>} Le tenant mis à jour
  */
-export const updateTenantStatus = async (id, newStatus) => {
-    const response = await axiosInstance.patch(`${BASE_URL()}/tenants/${id}/status/`, { status: newStatus });
+export const updateTenantStatus = async (id, newStatus, confirmation) => {
+    const response = await axiosInstance.patch(`${BASE_URL()}/tenants/${id}/status/`, {
+        status: newStatus,
+        ...(confirmation ? { confirmation } : {}),
+    });
     return response.data;
 };
 
@@ -110,6 +119,27 @@ export const getTenantFunctionalServices = async (id) => {
  */
 export const bulkSetTenantFunctionalServices = async (id, services) => {
     const response = await axiosInstance.post(`${BASE_URL()}/tenants/${id}/functional-services/bulk/`, { services });
+    return response.data;
+};
+
+/**
+ * Même opération que `bulkSetTenantFunctionalServices`, mais pour un
+ * établissement DÉJÀ EN PRODUCTION (fiche d'un tenant existant) — double
+ * confirmation renforcée : requiert `confirmation` dès qu'au moins un
+ * service est désactivé (codes désactivés triés, joints par une virgule),
+ * revérifié côté backend. Ne remplace PAS `bulkSetTenantFunctionalServices`,
+ * toujours utilisé tel quel par l'étape 3 du wizard de création (aucune
+ * confirmation exigée là, mission §5.2).
+ * @param {string} id
+ * @param {Array<{code:string, enabled:boolean}>} services
+ * @param {string} [confirmation]
+ * @returns {Promise<Array>}
+ */
+export const bulkSetTenantFunctionalServicesConfirmed = async (id, services, confirmation) => {
+    const response = await axiosInstance.post(`${BASE_URL()}/tenants/${id}/functional-services/bulk-confirmed/`, {
+        services,
+        ...(confirmation ? { confirmation } : {}),
+    });
     return response.data;
 };
 
@@ -177,11 +207,15 @@ export const getTenantDatabases = async (id) => {
  * archive puis efface irréversiblement ses 5 bases de données et son
  * entrée du registre. Différent de `updateTenantStatus(id, "INACTIVE")`
  * (suspension, réversible, tout est conservé) — voir MULTITENANT_ARCHITECTURE.md.
+ *
+ * `confirmation` (double confirmation renforcée) : requis par le backend,
+ * doit être le nom exact du tenant — revérifié côté serveur.
  * @param {string} id
+ * @param {string} confirmation
  * @returns {Promise<Object>} {deletion_record_id, tenant_id, tenant_identifier, status, archive_reference, completed_at}
  */
-export const deleteTenantPermanently = async (id) => {
-    const response = await axiosInstance.post(`${BASE_URL()}/tenants/${id}/delete/`);
+export const deleteTenantPermanently = async (id, confirmation) => {
+    const response = await axiosInstance.post(`${BASE_URL()}/tenants/${id}/delete/`, { confirmation });
     return response.data;
 };
 

@@ -46,7 +46,7 @@ from django.core.exceptions import ValidationError
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -84,6 +84,7 @@ from .serializers import (
     TenantFunctionalServiceToggleSerializer,
     TenantProvisionAdminRequestSerializer,
     TenantProvisionRequestSerializer,
+    TenantPublicInfoSerializer,
     TenantResolutionSerializer,
     TenantSerializer,
     TenantStatusUpdateSerializer,
@@ -194,12 +195,28 @@ class TenantViewSet(mixins.CreateModelMixin,
 
     @action(detail=True, methods=['patch'], url_path='status')
     def update_status(self, request, id=None):
-        """PATCH /tenants/{tenant_id}/status/ — active ou désactive un tenant."""
+        """
+        PATCH /tenants/{tenant_id}/status/ — active ou désactive un tenant.
+
+        Double confirmation renforcée (mission dédiée) : une SUSPENSION
+        (`status=INACTIVE`) exige `{"confirmation": "<nom exact du
+        tenant>"}` dans le corps, revérifié ici — jamais une confiance
+        dans la seule saisie frontend (voir ConfirmAction.Modal.jsx). Une
+        RÉACTIVATION (`status=ACTIVE`) n'exige rien de plus qu'avant :
+        action restauratrice, jamais destructive, hors du périmètre de ce
+        renforcement (mission, §5).
+        """
         tenant = self.get_object()
 
         serializer = TenantStatusUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data['status']
+
+        if new_status == TenantStatus.INACTIVE and request.data.get('confirmation') != tenant.name:
+            return Response(
+                {'detail': "Valeur de confirmation incorrecte. Aucune suspension n'a été effectuée."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if new_status == TenantStatus.ACTIVE:
             tenant = self.service.activate_tenant(tenant.id)
@@ -225,11 +242,16 @@ class TenantViewSet(mixins.CreateModelMixin,
         physique → suppression du registre, dans cet ordre précis).
 
         Même protection que le reste de ce ViewSet (`IsPlatformAdmin`,
-        permission de classe) — aucune permission nouvelle. Aucun corps
-        de requête attendu : la confirmation forte (saisie du nom exact)
-        est un contrôle FRONTEND (UX) — reproduit ici uniquement par le
-        fait que cette action est irréversible et volontairement séparée
-        de `update_status`, jamais un second contrôle serveur redondant.
+        permission de classe) — aucune permission nouvelle.
+
+        Double confirmation renforcée (mission dédiée) : le corps DOIT
+        contenir `{"confirmation": "<nom exact du tenant>"}` — la saisie
+        manuelle stricte reste imposée côté frontend (voir
+        ConfirmAction.Modal.jsx, `requireTypedConfirmation`), mais n'est
+        JAMAIS considérée suffisante seule : revérifié ici, car un
+        contrôle uniquement frontend ne protège en rien un appel API
+        direct. 400 si absent ou incorrect — aucune suppression n'est
+        jamais tentée dans ce cas.
 
         Réponses :
           - 200 : suppression COMPLETED, corps = résumé du
@@ -246,6 +268,13 @@ class TenantViewSet(mixins.CreateModelMixin,
             supprimé "à moitié".
         """
         tenant = self.get_object()  # 404 DRF standard si absent — cohérent avec le reste du ViewSet.
+
+        confirmation = request.data.get('confirmation')
+        if confirmation != tenant.name:
+            return Response(
+                {'detail': "Valeur de confirmation incorrecte. Aucune suppression n'a été effectuée."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             record = self.deletion_service.delete_tenant(tenant.id, actor=request.user)
@@ -382,17 +411,23 @@ class TenantViewSet(mixins.CreateModelMixin,
                 tenant.id, nom=payload['nom'], prenom=payload.get('prenom', ''), email=admin_email,
             )
             admin_created = True
-            temporary_password = result.get('temporary_password')
+            activation_token = result.get('activation_token')
         except AdminProvisioningError as exc:
             admin_detail = str(exc)
-            temporary_password = None
+            activation_token = None
 
-        if admin_created and temporary_password:
+        if admin_created and activation_token:
             establishment_url = settings.TENANT_ESTABLISHMENT_URL_TEMPLATE.format(identifier=tenant.identifier)
+            # Onboarding admin sécurisé : le lien pointe vers l'établissement
+            # RÉELLEMENT créé (jamais une URL générique) — voir §4.4 de la
+            # mission. `tenant.id` (jamais l'identifier) est le paramètre
+            # attendu par AdminActivationVerifyView/CompleteView côté
+            # service-personnel, pour le routage multi-base.
+            activation_url = f"{establishment_url}/activation-admin?tenant_id={tenant.id}&token={activation_token}"
             try:
                 send_tenant_admin_welcome_email(
                     tenant_name=tenant.name, establishment_url=establishment_url,
-                    admin_email=admin_email, temporary_password=temporary_password,
+                    admin_email=admin_email, activation_url=activation_url,
                 )
                 email_sent = True
             except Exception as exc:  # backend d'email potentiellement mal configuré (SMTP prod)
@@ -444,6 +479,46 @@ class TenantViewSet(mixins.CreateModelMixin,
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         return Response(TenantResolutionSerializer(tenant).data)
+
+    @action(detail=False, methods=['get'], url_path='public-info', permission_classes=[AllowAny], authentication_classes=[])
+    def public_info(self, request):
+        """
+        GET /tenants/tenants/public-info/?identifier=<identifier>
+
+        SEUL endpoint public (non authentifié) de ce module — accès
+        tenant/landing (Cycle de vie du tenant) : permet à la landing et à
+        la page de login, servies AVANT toute authentification, de savoir
+        si l'`identifier` déduit du hostname correspond à un établissement
+        réel, et d'afficher son nom/logo. Réutilise exactement la même
+        recherche que `resolve` (`get_tenant_by_identifier`), jamais une
+        deuxième logique de résolution parallèle.
+
+        404 si l'identifiant ne correspond à AUCUN tenant — le frontend
+        doit alors bloquer l'accès (page "Établissement introuvable"),
+        jamais afficher une landing/un login générique à sa place. Ne
+        distingue PAS un tenant suspendu d'un tenant actif (les deux
+        renvoient 200) : seule l'EXISTENCE est en jeu ici, la suspension
+        reste appliquée ailleurs (login, accès applicatif) — un
+        établissement suspendu doit pouvoir continuer à afficher sa
+        landing/son login, l'utilisateur étant de toute façon bloqué à la
+        tentative de connexion.
+
+        N'expose que `name`/`identifier`/`logo_display_url`
+        (TenantPublicInfoSerializer) — jamais `id`, `status`, ni aucun
+        champ de configuration.
+        """
+        identifier = request.query_params.get('identifier')
+        if not identifier:
+            return Response(
+                {'detail': "Le paramètre 'identifier' est requis."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tenant = self.service.get_tenant_by_identifier(identifier)
+        if tenant is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        return Response(TenantPublicInfoSerializer(tenant).data)
 
     @property
     def functional_service_service(self) -> TenantFunctionalServiceService:
@@ -584,6 +659,54 @@ class TenantViewSet(mixins.CreateModelMixin,
         body_serializer.is_valid(raise_exception=True)
         pairs = [(item['code'], item['enabled']) for item in body_serializer.validated_data['services']]
 
+        return self._apply_functional_service_pairs(tenant, pairs)
+
+    @action(detail=True, methods=['post'], url_path='functional-services/bulk-confirmed')
+    def bulk_set_functional_services_confirmed(self, request, id=None):
+        """
+        POST /tenants/{id}/functional-services/bulk-confirmed/ — même
+        opération que `bulk_set_functional_services` ci-dessus, mais pour
+        un établissement DÉJÀ EN PRODUCTION (fiche d'un tenant existant,
+        `ServicesConfigSection.jsx`) : double confirmation renforcée
+        (mission dédiée).
+
+        Distincte de `bulk_set_functional_services` (wizard de création,
+        INCHANGÉ, aucune confirmation exigée — mission, §5.2 exclusion
+        explicite de l'étape 3) précisément pour ne jamais imposer cette
+        contrainte à la création d'un tenant.
+
+        Si au moins un service est DÉSACTIVÉ dans le corps, `confirmation`
+        est obligatoire et doit correspondre exactement aux codes désactivés
+        triés et joints par une virgule (ex: un seul service désactivé →
+        juste son code, comme dans l'exemple de la mission). Activer un ou
+        plusieurs services sans en désactiver aucun n'exige rien de plus
+        qu'avant (action non destructive).
+        """
+        tenant = self.get_object()
+
+        body_serializer = TenantFunctionalServiceBulkSerializer(data=request.data)
+        body_serializer.is_valid(raise_exception=True)
+        pairs = [(item['code'], item['enabled']) for item in body_serializer.validated_data['services']]
+
+        disabled_codes = sorted(code for code, enabled in pairs if not enabled)
+        if disabled_codes:
+            expected = ','.join(disabled_codes)
+            if request.data.get('confirmation') != expected:
+                return Response(
+                    {'detail': "Valeur de confirmation incorrecte. Aucune modification n'a été effectuée."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        return self._apply_functional_service_pairs(tenant, pairs)
+
+    def _apply_functional_service_pairs(self, tenant, pairs):
+        """
+        Partagé par `bulk_set_functional_services` (wizard) et
+        `bulk_set_functional_services_confirmed` (fiche établissement) —
+        UNE SEULE implémentation de l'écriture réelle, de l'audit et de
+        l'invalidation de cache : la double confirmation renforcée ne
+        touche jamais à cette logique métier.
+        """
         try:
             self.functional_service_service.bulk_set(tenant.id, pairs)
         except UnknownFunctionalServiceError as exc:

@@ -1,9 +1,14 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { APP_NAME_DISPLAY } from '../../constants/branding.js';
+import { usePublicTenantResolution } from '../../hooks/usePublicTenantResolution.js';
+import { EstablishmentNotFoundScreen } from '../../GlobalComponents/EstablishmentNotFoundScreen.jsx';
+import { PublicTenantIdentity } from '../../GlobalComponents/PublicTenantIdentity.jsx';
+import { Loading } from '../../GlobalComponents/Loading.jsx';
 
 export function LandingPage() {
     const navigate = useNavigate();
+    const { checking, blocked, tenant } = usePublicTenantResolution();
 
     function StatCard({ number, label, variant = 'white' }) {
         return (
@@ -56,6 +61,16 @@ export function LandingPage() {
         { icon: "/helpcenter.png", title: "Pharmacy" }
     ];
 
+    // Accès tenant/landing (Cycle de vie du tenant) : un hostname de
+    // sous-domaine (`hopital-x.<root>`) qui ne correspond à AUCUN
+    // établissement réel ne doit JAMAIS afficher cette landing (générique
+    // ou personnalisée) — voir usePublicTenantResolution.js. `checking`
+    // couvre aussi bien le cas "hors convention" (résolu immédiatement,
+    // sans appel réseau) que le cas "sous-domaine tenant en cours de
+    // vérification".
+    if (checking) return <Loading />;
+    if (blocked) return <EstablishmentNotFoundScreen />;
+
     return (
         <div className="min-h-screen">
             {/* Hero Section - Blue Gradient Background */}
@@ -72,12 +87,20 @@ export function LandingPage() {
     </div>
 
     {/* Contenu */}
-    <div className="container mx-auto px-6 pt-24 relative z-10">
+    <div className="container mx-auto px-6 pt-16 relative z-10">
         <div className="flex flex-col items-center text-center">
             <div className="w-full max-w-2xl">
+                {tenant && (
+                    <div className="mb-6">
+                        <PublicTenantIdentity tenant={tenant} variant="dark" />
+                    </div>
+                )}
                 <h1 className="text-4xl md:text-5xl font-bold text-white text-left mb-4">
-                    Welcome to<br />
-                    {APP_NAME_DISPLAY}
+                    {tenant ? (
+                        <>Bienvenue à<br />{tenant.name}</>
+                    ) : (
+                        <>Welcome to<br />{APP_NAME_DISPLAY}</>
+                    )}
                 </h1>
                 <p className="text-white/80 text-left text-lg mb-8">
                     The hospital to trust to care about those you love

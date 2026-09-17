@@ -70,9 +70,10 @@ def create_first_admin(tenant_id, *, nom: str, prenom: str, email: str) -> dict:
     (Cycle de vie du tenant, Phase 2) pour créer le compte administrateur
     initial d'un tenant dont la base PERSONNEL est déjà ACTIVE.
 
-    Retourne le JSON du service ({id, email, temporary_password}). Lève
-    AdminProvisioningError sur tout échec — jamais un compte "à moitié"
-    créé qu'on prétendrait fonctionnel.
+    Retourne le JSON du service ({id, email, activation_token,
+    activation_expires_at} — onboarding admin sécurisé, plus de mot de
+    passe en clair). Lève AdminProvisioningError sur tout échec — jamais
+    un compte "à moitié" créé qu'on prétendrait fonctionnel.
     """
     base_url = f"{settings.PROVISIONING_SERVICE_PERSONNEL_URL.rstrip('/')}/api"
     try:
