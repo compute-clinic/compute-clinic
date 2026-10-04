@@ -74,9 +74,15 @@ function useLogin() {
       console.log('URL Gateway:', gatewayURL);
       console.log('Données envoyées:', { email: data.email, password: '***' });
 
+      const loginPayload = {
+        password: data.password,
+        ...(data.email ? { email: data.email.trim() } : {}),
+        ...(data.username ? { username: data.username.trim() } : {}),
+      };
+
       const response = await axios.post(
         `${gatewayURL}/auth/login`,
-        { email: data.email, password: data.password }
+        loginPayload
       );
 
       console.log('=== RÉPONSE DE LA GATEWAY ===');

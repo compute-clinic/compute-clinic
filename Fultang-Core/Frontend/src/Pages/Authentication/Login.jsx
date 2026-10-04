@@ -29,6 +29,7 @@ export function LoginPage() {
     const { t } = useTranslation();
     const data = {
         email: username,
+        username: username,
         password: password
     }
 

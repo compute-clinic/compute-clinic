@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 
 class LoginCredentials(BaseModel):
-    email: str = Field(..., example="admin@fultang.local")
+    email: Optional[str] = Field(default=None, example="admin@fultang.local")
+    username: Optional[str] = Field(default=None, example="admin-user")
     password: str = Field(..., example="adminpass")
 
 class TokenResponse(BaseModel):
@@ -630,11 +631,14 @@ async def login(credentials: LoginCredentials, request: Request):
     `localhost`, développement local) résout vers `tenant_id = None`, qui
     correspond au pool de comptes non encore rattachés à un tenant.
     """
+    if not credentials.email and not credentials.username:
+        raise HTTPException(status_code=400, detail="Email ou nom d'utilisateur requis")
+
     hostname = request.headers.get("host", "")
     try:
         tenant_context = await tenant_resolver.resolve(hostname)
-    except TenantNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    except TenantNotFoundError:
+        raise HTTPException(status_code=404, detail="Tenant introuvable")
     except TenantInactiveError as exc:
         raise HTTPException(status_code=403, detail=_tenant_suspended_detail())
     except TenantResolutionError as exc:
@@ -645,7 +649,7 @@ async def login(credentials: LoginCredentials, request: Request):
     try:
         response = await client.post(
             f"{settings.SERVICE_PERSONNEL_URL}/api/auth/verify/",
-            json={**credentials.dict(), "tenant_id": tenant_id}
+            json={**credentials.model_dump(exclude_none=True), "tenant_id": tenant_id}
         )
         if response.status_code != 200:
             raise HTTPException(status_code=401, detail="Identifiants invalides")
@@ -846,13 +850,12 @@ async def proxy_catch_all(path: str, request: Request):
     try:
         tenant_context = await tenant_resolver.resolve(hostname)
     except TenantNotFoundError:
-        # Corps structuré (pas juste `str(exc)`) : une session déjà ouverte
-        # sur ce sous-domaine (onglet resté ouvert au moment d'une
-        # suppression définitive, §14.14) doit être coupée par le même
-        # mécanisme frontend qu'une suspension (voir
-        # Utils/fultangErrorEvents.js) — jusqu'ici seul le chemin JWT hors
-        # convention hostname (ci-dessous) le faisait, jamais celui-ci.
-        raise HTTPException(status_code=404, detail=_tenant_deleted_detail())
+        # Un sous-domaine tenant inconnu / faux doit rester un 404 générique
+        # du frontend d'accès public (landing/login). Le cas "tenant supprimé
+        # définitivement" est réservé aux sessions déjà ouvertes et au JWT
+        # d'un ancien tenant encore présent dans le registre de manière
+        # transitoire, signalé par la logique plus bas (live_status is None).
+        raise HTTPException(status_code=404, detail="Tenant introuvable")
     except TenantInactiveError as exc:
         raise HTTPException(status_code=403, detail=_tenant_suspended_detail())
     except TenantResolutionError as exc:

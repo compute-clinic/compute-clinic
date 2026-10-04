@@ -357,11 +357,13 @@ class AuthVerifyView(APIView):
 
     def post(self, request):
         email = request.data.get('email')
+        username = request.data.get('username')
         password = request.data.get('password')
         tenant_id = request.data.get('tenant_id')  # None = pool non assigné
+        login_identifier = email or username
 
-        if not email or not password:
-            return Response({"detail": "Email et mot de passe requis"}, status=status.HTTP_400_BAD_REQUEST)
+        if not login_identifier or not password:
+            return Response({"detail": "Email ou nom d'utilisateur et mot de passe requis"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Doit être fait AVANT tout accès ORM ci-dessous (y compris les
         # logs de debug qui suivent) — voir tenant_routing/router.py.
@@ -373,32 +375,40 @@ class AuthVerifyView(APIView):
         set_tenant_context(tenant_id)
 
         # DEBUG LOGS
-        print(f"Tentative de connexion pour: {email} (tenant_id={tenant_id})")
+        print(f"Tentative de connexion pour: {login_identifier} (tenant_id={tenant_id})")
         from .models import Admin, Directeur
         print(f"Nombre d'Admins en base: {Admin.objects.count()}")
         print(f"Nombre de Directeurs en base: {Directeur.objects.count()}")
 
-        # Liste des modèles de personnel à vérifier
-        personnel_models = [
-            Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier,
-            ComptableMatiere, Caissier, Laborantin, Pharmacien, Directeur, Admin
-        ]
-
         user = None
         user_role = None
 
-        for model in personnel_models:
+        if email:
+            personnel_models = [
+                Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier,
+                ComptableMatiere, Caissier, Laborantin, Pharmacien, Directeur, Admin
+            ]
+            for model in personnel_models:
+                try:
+                    user = model.objects.get(email=email, tenant_id=tenant_id)
+                    user_role = model.__name__
+                    break
+                except model.DoesNotExist:
+                    continue
+                except model.MultipleObjectsReturned:
+                    # Ne devrait pas arriver grâce à UniqueConstraint(tenant_id, email) —
+                    # sauf pour tenant_id=NULL, où Postgres n'impose pas l'unicité entre
+                    # plusieurs NULL. On refuse plutôt que de choisir arbitrairement.
+                    continue
+
+        if user is None and username:
             try:
-                user = model.objects.get(email=email, tenant_id=tenant_id)
-                user_role = model.__name__
-                break
-            except model.DoesNotExist:
-                continue
-            except model.MultipleObjectsReturned:
-                # Ne devrait pas arriver grâce à UniqueConstraint(tenant_id, email) —
-                # sauf pour tenant_id=NULL, où Postgres n'impose pas l'unicité entre
-                # plusieurs NULL. On refuse plutôt que de choisir arbitrairement.
-                continue
+                user = Admin.objects.get(username=username, tenant_id=tenant_id)
+                user_role = 'Admin'
+            except Admin.DoesNotExist:
+                user = None
+            except Admin.MultipleObjectsReturned:
+                user = None
 
         if user is not None and check_password(password, user.mot_de_passe):
             # Onboarding admin sécurisé : un compte Admin créé via
@@ -419,7 +429,7 @@ class AuthVerifyView(APIView):
                 'paul.talla@fultang.local': 'ComptableFinancier',
                 'a.matiere@fultang.local': 'ComptableMatiere',
             }
-            canonical = CANONICAL_ROLES.get((email or '').lower())
+            canonical = CANONICAL_ROLES.get((email or username or '').lower())
             if canonical:
                 user_role = canonical
 

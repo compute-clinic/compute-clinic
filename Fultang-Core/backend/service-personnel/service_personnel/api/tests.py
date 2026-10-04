@@ -7,7 +7,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .authentication import GatewayHeaderAuthentication
-from .models import Medecin
+from .models import Admin, Medecin
 from .tenant_routing.context import set_tenant_context
 
 TENANT_A = uuid.uuid4()
@@ -133,6 +133,31 @@ class AuthVerifyTenantScopingTests(APITestCase):
     def test_missing_credentials_returns_400(self):
         response = self.client.post("/api/auth/verify/", {"tenant_id": str(TENANT_A)}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_login_succeeds_with_admin_username(self):
+        Admin.objects.using('default').create(
+            nom='Dupont',
+            prenom='Jean',
+            date_naissance='1980-01-01',
+            adresse='Yaoundé',
+            email='jean.dupont@fultang.local',
+            contact='+237600000000',
+            matricule='ADM-0001',
+            date_embauche='2020-01-01',
+            mot_de_passe=make_password('secret123'),
+            statut='Actif',
+            tenant_id=TENANT_A,
+            username='jeandup',
+            compte_active=True,
+        )
+
+        response = self.client.post(
+            "/api/auth/verify/",
+            {"username": "jeandup", "password": "secret123", "tenant_id": str(TENANT_A)},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["email"], "jean.dupont@fultang.local")
 
 
 class PersonnelTenantUniquenessTests(TestCase):
