@@ -66,7 +66,7 @@ class Tenant(models.Model):
         help_text="Statut du tenant dans le registre (actif / inactif).",
     )
     allow_clinical_agent_export = models.BooleanField(
-        default=True,
+        default=False,
         help_text=(
             "Autorise ou non l'envoi des données médicales anonymisées de "
             "ce tenant vers clinical-agent / MedTutor. Par défaut True : "
@@ -77,6 +77,13 @@ class Tenant(models.Model):
             "avant toute lecture de données destinées à l'export, jamais "
             "après ; la logique de décision reste dans clinical-agent, ce "
             "champ n'est qu'une configuration."
+        ),
+    )
+    clinical_data_sharing_policy_accepted = models.BooleanField(
+        default=False,
+        help_text=(
+            "Trace l'acceptation explicite de la politique de partage des "
+            "données cliniques. Requise avant toute activation de l'export."
         ),
     )
     created_at = models.DateTimeField(

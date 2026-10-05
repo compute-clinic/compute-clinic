@@ -49,6 +49,7 @@ class TenantSerializer(serializers.ModelSerializer):
         model = Tenant
         fields = [
             'id', 'name', 'identifier', 'status', 'allow_clinical_agent_export',
+            'clinical_data_sharing_policy_accepted',
             *TENANT_PROFILE_FIELDS, 'logo_display_url', 'establishment_url', 'created_at',
         ]
         read_only_fields = ['id', 'status', 'created_at', 'logo_display_url', 'establishment_url']
@@ -73,6 +74,13 @@ class TenantSerializer(serializers.ModelSerializer):
         """
         return settings.TENANT_ESTABLISHMENT_URL_TEMPLATE.format(identifier=obj.identifier)
 
+    def validate(self, attrs):
+        if attrs.get('allow_clinical_agent_export') is True and attrs.get('clinical_data_sharing_policy_accepted') is not True:
+            raise serializers.ValidationError({
+                'clinical_data_sharing_policy_accepted': "L'acceptation explicite de la politique est requise pour activer le partage."
+            })
+        return attrs
+
 
 class TenantUpdateSerializer(serializers.ModelSerializer):
     """
@@ -88,7 +96,14 @@ class TenantUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tenant
-        fields = ['allow_clinical_agent_export', *TENANT_PROFILE_FIELDS]
+        fields = ['allow_clinical_agent_export', 'clinical_data_sharing_policy_accepted', *TENANT_PROFILE_FIELDS]
+
+    def validate(self, attrs):
+        if attrs.get('allow_clinical_agent_export') is True and attrs.get('clinical_data_sharing_policy_accepted') is not True:
+            raise serializers.ValidationError({
+                'clinical_data_sharing_policy_accepted': "L'acceptation explicite de la politique est requise pour activer le partage."
+            })
+        return attrs
 
 
 class TenantStatusUpdateSerializer(serializers.Serializer):

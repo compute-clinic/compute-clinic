@@ -38,7 +38,8 @@ const INITIAL_FORM_DATA = {
     adminNom: "",
     adminPrenom: "",
     adminEmail: "",
-    allowClinicalAgentExport: true,
+    allowClinicalAgentExport: false,
+    clinicalDataSharingPolicyAccepted: false,
     services: [],
 };
 
@@ -125,6 +126,8 @@ export function CreateTenantWizard() {
                 address: formData.address,
                 phone: formData.phone,
                 email: formData.email,
+                allow_clinical_agent_export: formData.allowClinicalAgentExport,
+                clinical_data_sharing_policy_accepted: formData.clinicalDataSharingPolicyAccepted,
             });
         } catch (error) {
             console.error("Erreur lors de la création du tenant:", error);
@@ -144,9 +147,7 @@ export function CreateTenantWizard() {
         let provisioningResults = [];
 
         try {
-            if (!formData.allowClinicalAgentExport) {
-                await updateTenant(tenant.id, { allow_clinical_agent_export: false });
-            }
+            // La préférence a été validée au moment de la création, avec son acceptation explicite.
         } catch (error) {
             console.error("Erreur lors de la mise à jour de la configuration technique:", error);
             incomplete = true;
@@ -285,7 +286,9 @@ export function CreateTenantWizard() {
                                 {currentStep === 2 && (
                                     <Step2TechnicalConfig
                                         allowClinicalAgentExport={formData.allowClinicalAgentExport}
+                                        policyAccepted={formData.clinicalDataSharingPolicyAccepted}
                                         onChange={(value) => updateFormData({ allowClinicalAgentExport: value })}
+                                        onPolicyAcceptedChange={(value) => updateFormData({ clinicalDataSharingPolicyAccepted: value })}
                                         onNext={() => advanceToStep(3)}
                                         onBack={() => goToStep(1)}
                                     />

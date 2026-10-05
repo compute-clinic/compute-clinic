@@ -30,7 +30,7 @@ class InternalServiceCallError(Exception):
     """Erreur générique d'appel à un service interne (HTTP ou réseau)."""
 
 
-def call_internal_service(base_url: str, path: str, payload: dict, timeout: Optional[int] = None) -> dict:
+def call_internal_service(base_url: str, path: str, payload: dict, timeout: Optional[int] = None, method: str = "POST") -> dict:
     """
     POST `payload` (JSON) vers `{base_url}/{path}`, authentifié par le
     jeton de service interne partagé.
@@ -47,7 +47,7 @@ def call_internal_service(base_url: str, path: str, payload: dict, timeout: Opti
             "X-Internal-Service-Token": settings.TENANT_SERVICE_INTERNAL_TOKEN,
             "Content-Type": "application/json",
         },
-        method="POST",
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout or settings.PROVISIONING_TIMEOUT_SECONDS) as response:
@@ -132,5 +132,34 @@ def create_first_admin(tenant_id, *, nom: str, prenom: str, email: str) -> dict:
             base_url, "internal/create-first-admin/",
             {"tenant_id": str(tenant_id), "nom": nom, "prenom": prenom, "email": email},
         )
+    except InternalServiceCallError as exc:
+        raise AdminProvisioningError(str(exc)) from exc
+
+
+def get_primary_tenant_admin(tenant_id) -> dict:
+    base_url = f"{settings.PROVISIONING_SERVICE_PERSONNEL_URL.rstrip('/')}/api"
+    try:
+        return call_internal_service_get(base_url, "internal/primary-tenant-admin/", {"tenant_id": str(tenant_id)})
+    except InternalServiceCallError as exc:
+        raise AdminProvisioningError(str(exc)) from exc
+
+
+def update_primary_tenant_admin(tenant_id, payload: dict) -> dict:
+    base_url = f"{settings.PROVISIONING_SERVICE_PERSONNEL_URL.rstrip('/')}/api"
+    try:
+        return call_internal_service(
+            base_url, "internal/primary-tenant-admin/", {"tenant_id": str(tenant_id), **payload}, method="PATCH",
+        )
+    except InternalServiceCallError as exc:
+        raise AdminProvisioningError(str(exc)) from exc
+
+
+def resend_admin_activation(tenant_id, *, email: Optional[str] = None) -> dict:
+    base_url = f"{settings.PROVISIONING_SERVICE_PERSONNEL_URL.rstrip('/')}/api"
+    payload = {"tenant_id": str(tenant_id)}
+    if email:
+        payload['email'] = email
+    try:
+        return call_internal_service(base_url, "internal/resend-admin-activation/", payload)
     except InternalServiceCallError as exc:
         raise AdminProvisioningError(str(exc)) from exc

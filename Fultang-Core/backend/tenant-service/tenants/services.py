@@ -79,6 +79,13 @@ class TenantService:
         """Active/désactive l'autorisation d'export clinical-agent pour ce tenant."""
         return self._repository.update_allow_clinical_agent_export(tenant_id, value)
 
+    def set_clinical_data_sharing(self, tenant_id: UUID, *, allowed: bool, policy_accepted: bool = False) -> Tenant:
+        if allowed and not policy_accepted:
+            raise ValueError("L'acceptation explicite de la politique est requise pour activer le partage.")
+        return self._repository.update_clinical_data_sharing(
+            tenant_id, allowed=allowed, policy_accepted=policy_accepted,
+        )
+
     def update_profile(self, tenant_id: UUID, **profile_fields) -> Tenant:
         """Met à jour les champs de profil descriptifs (address/phone/email/logo_url)."""
         return self._repository.update_profile(tenant_id, **profile_fields)

@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Building2, CheckCircle2, XCircle, ArrowLeft, Save, Loader2, ExternalLink, Ban, RotateCcw, Trash2, AlertTriangle } from "lucide-react";
+import { Building2, CheckCircle2, XCircle, ArrowLeft, Save, Loader2, ExternalLink, Ban, RotateCcw, Trash2, AlertTriangle, ChevronDown, ChevronUp, Send, Pencil } from "lucide-react";
 import { CustomDashboard } from "../../../GlobalComponents/CustomDashboard.jsx";
 import { AppHeader } from "../../../GlobalComponents/AppHeader.jsx";
 import { platformAdminNavLink } from "../platformAdminNavLink.js";
 import { AppRoutesPaths } from "../../../Router/appRouterPaths.js";
-import { getTenant, updateTenant, updateTenantStatus, deleteTenantPermanently } from "../../../services/platformAdminApi.js";
+import { getTenant, getPrimaryTenantAdmin, resendTenantAdminActivation, updatePrimaryTenantAdmin, updateTenant, updateTenantStatus, deleteTenantPermanently } from "../../../services/platformAdminApi.js";
 import { establishmentConfigCategories } from "./configCategories.js";
 import { LogoUploader } from "./LogoUploader.jsx";
 import { TechnicalSheet } from "./TechnicalSheet.jsx";
@@ -45,6 +45,13 @@ export function EstablishmentDetailPage() {
     const navigate = useNavigate();
     const { showSuccess, showError } = useFeedback();
     const [tenant, setTenant] = useState(null);
+    const [primaryAdmin, setPrimaryAdmin] = useState(null);
+    const [adminExpanded, setAdminExpanded] = useState(false);
+    const [resendingActivation, setResendingActivation] = useState(false);
+    const [editingAdmin, setEditingAdmin] = useState(false);
+    const [adminForm, setAdminForm] = useState({ nom: "", prenom: "", email: "", username: "" });
+    const [adminSaving, setAdminSaving] = useState(false);
+    const [policyAccepted, setPolicyAccepted] = useState(false);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState("");
 
@@ -79,8 +86,12 @@ export function EstablishmentDetailPage() {
             setLoadError("");
             try {
                 const data = await getTenant(tenantId);
+                const admin = await getPrimaryTenantAdmin(tenantId);
                 if (!cancelled) {
                     setTenant(data);
+                    setPrimaryAdmin(admin);
+                    setAdminForm(admin ? { nom: admin.nom || "", prenom: admin.prenom || "", email: admin.email || "", username: admin.username || "" } : { nom: "", prenom: "", email: "", username: "" });
+                    setPolicyAccepted(Boolean(data.clinical_data_sharing_policy_accepted));
                     setProfileForm({
                         address: data.address || "",
                         phone: data.phone || "",
@@ -117,7 +128,10 @@ export function EstablishmentDetailPage() {
     const handleExportConfirmed = async () => {
         setExportSaving(true);
         try {
-            const updated = await updateTenant(tenantId, { allow_clinical_agent_export: draftExportAllowed });
+            const updated = await updateTenant(tenantId, {
+                allow_clinical_agent_export: draftExportAllowed,
+                clinical_data_sharing_policy_accepted: policyAccepted,
+            });
             setTenant(updated);
             setDraftExportAllowed(Boolean(updated.allow_clinical_agent_export));
             showSuccess("Configuration mise à jour");
@@ -128,6 +142,45 @@ export function EstablishmentDetailPage() {
             setExportSaving(false);
             setExportConfirmStep(0);
         }
+    };
+
+    const cancelExportChange = () => {
+        setExportConfirmStep(0);
+        setDraftExportAllowed(Boolean(tenant?.allow_clinical_agent_export));
+        setPolicyAccepted(Boolean(tenant?.clinical_data_sharing_policy_accepted));
+    };
+
+    const beginExportChange = () => {
+        if (draftExportAllowed && !policyAccepted) {
+            showError("Veuillez accepter la politique avant d’activer le partage.");
+            return;
+        }
+        setExportConfirmStep(1);
+    };
+
+    const handleResendActivation = async () => {
+        setResendingActivation(true);
+        try {
+            await resendTenantAdminActivation(tenantId, primaryAdmin?.email);
+            showSuccess("Email d’activation renvoyé");
+        } catch (error) {
+            showError(error?.response?.data?.detail || "Impossible de renvoyer l’email d’activation");
+        } finally { setResendingActivation(false); }
+    };
+
+    const handleAdminSave = async () => {
+        setAdminSaving(true);
+        try {
+            const updated = await updatePrimaryTenantAdmin(tenantId, adminForm);
+            setPrimaryAdmin(updated);
+            setAdminForm({ nom: updated.nom || "", prenom: updated.prenom || "", email: updated.email || "", username: updated.username || "" });
+            setEditingAdmin(false);
+            showSuccess("Informations de l’administrateur mises à jour");
+        } catch (error) {
+            const data = error?.response?.data;
+            const message = data?.email?.[0] || data?.username?.[0] || data?.detail || "Impossible de modifier l’administrateur";
+            showError(message);
+        } finally { setAdminSaving(false); }
     };
 
     const isTenantActive = tenant?.status === "ACTIVE";
@@ -324,7 +377,7 @@ export function EstablishmentDetailPage() {
                                 </div>
                             </div>
 
-                            {(tenant.admin_name || tenant.admin_email || tenant.admin?.name || tenant.admin?.email || tenant.admin_nom || tenant.admin_email) && (
+                            {primaryAdmin && (
                                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-4">
                                     <div className="flex items-center justify-between gap-4">
                                         <div>
@@ -332,15 +385,14 @@ export function EstablishmentDetailPage() {
                                                 Administrateur du tenant
                                             </span>
                                             <span className="block text-sm font-semibold text-gray-800">
-                                                {(tenant.admin_name || tenant.admin?.name || tenant.admin_nom || "")}
+                                                {[primaryAdmin.prenom, primaryAdmin.nom].filter(Boolean).join(" ")}
                                             </span>
-                                            {(tenant.admin_email || tenant.admin?.email || tenant.admin_email) && (
-                                                <span className="block text-sm text-gray-500">
-                                                    {(tenant.admin_email || tenant.admin?.email || tenant.admin_email)}
-                                                </span>
-                                            )}
+                                            <span className="block text-sm text-gray-500">{primaryAdmin.email}</span>
                                         </div>
+                                        <div className="flex items-center gap-1"><button type="button" onClick={() => setEditingAdmin((value) => !value)} className="inline-flex items-center gap-1 p-2 text-xs font-semibold text-gray-500 hover:text-primary-start" aria-label="Modifier l’administrateur"><Pencil className="w-4 h-4" /><span className="hidden sm:inline">Modifier</span></button><button type="button" onClick={() => setAdminExpanded((value) => !value)} className="p-2 text-gray-500 hover:text-primary-start" aria-expanded={adminExpanded} aria-label="Afficher les détails de l’administrateur">{adminExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}</button></div>
                                     </div>
+                                    {editingAdmin && <div className="mt-3 pt-3 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3"><input value={adminForm.nom} onChange={(e) => setAdminForm((form) => ({ ...form, nom: e.target.value }))} placeholder="Nom" className="h-10 px-3 rounded-lg border border-gray-200 text-sm" /><input value={adminForm.prenom} onChange={(e) => setAdminForm((form) => ({ ...form, prenom: e.target.value }))} placeholder="Prénom" className="h-10 px-3 rounded-lg border border-gray-200 text-sm" /><input value={adminForm.email} onChange={(e) => setAdminForm((form) => ({ ...form, email: e.target.value }))} placeholder="Email" type="email" className="h-10 px-3 rounded-lg border border-gray-200 text-sm" /><input value={adminForm.username} onChange={(e) => setAdminForm((form) => ({ ...form, username: e.target.value }))} placeholder="Username" className="h-10 px-3 rounded-lg border border-gray-200 text-sm" /><div className="sm:col-span-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingAdmin(false)} className="px-3 py-2 text-xs font-semibold text-gray-500">Annuler</button><button type="button" onClick={handleAdminSave} disabled={adminSaving} className="px-3 py-2 text-xs font-bold text-white rounded-lg bg-primary-end disabled:opacity-50">{adminSaving ? "Enregistrement…" : "Enregistrer"}</button></div></div>}
+                                    {adminExpanded && <div className="mt-3 pt-3 border-t border-gray-200"><div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-gray-600"><span><b>Username :</b> {primaryAdmin.username || "Non défini"}</span><span><b>Rôle :</b> {primaryAdmin.role}</span><span><b>Statut :</b> {primaryAdmin.account_status === "ACTIVE" ? "Actif" : "En attente d’activation"}</span></div>{primaryAdmin.activation_pending && <button type="button" onClick={handleResendActivation} disabled={resendingActivation} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-primary-start disabled:opacity-50">{resendingActivation ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}Renvoyer l’email d’activation</button>}</div>}
                                 </div>
                             )}
 
@@ -397,6 +449,7 @@ export function EstablishmentDetailPage() {
                             <h3 className="text-lg font-semibold text-gray-800 mb-4">Configuration technique</h3>
 
                             <div className="rounded-lg border border-gray-200 p-4 bg-gray-50 mb-3">
+                                <p className="text-xs leading-5 text-gray-600 mb-4">Le partage est volontaire et limité aux données anonymisées prévues pour les outils d’aide à la décision clinique de la plateforme. Il ne donne pas un accès général aux données de l’établissement. Lorsqu’elles sont conservées par le système, les informations gardent leur provenance ; l’accès reste limité au fonctionnement prévu par la plateforme.</p>
                                 <label className="flex items-start gap-3 cursor-pointer">
                                     <input
                                         type="checkbox"
@@ -407,7 +460,7 @@ export function EstablishmentDetailPage() {
                                     />
                                     <span>
                                         <span className="block text-sm font-bold text-gray-800">
-                                            Autoriser le partage des données cliniques
+                                            Activer le partage des données cliniques
                                         </span>
                                         <span className="block text-xs text-gray-500 mt-1">
                                             Les données médicales anonymisées de cet établissement pourront être
@@ -416,13 +469,17 @@ export function EstablishmentDetailPage() {
                                         </span>
                                     </span>
                                 </label>
+                                <label className="mt-4 pt-4 border-t border-gray-200 flex items-start gap-3 cursor-pointer">
+                                    <input type="checkbox" checked={policyAccepted} disabled={exportSaving} onChange={(e) => setPolicyAccepted(e.target.checked)} className="mt-0.5 w-5 h-5 rounded border-gray-300 text-primary-end focus:ring-primary-end accent-primary-end" />
+                                    <span className="text-xs leading-5 text-gray-700">J’ai pris connaissance de cette politique et j’accepte explicitement l’autorisation dans le périmètre décrit.</span>
+                                </label>
                             </div>
 
                             {hasExportChange && (
                                 <div className="flex justify-end">
                                     <button
                                         type="button"
-                                        onClick={() => setExportConfirmStep(1)}
+                                        onClick={beginExportChange}
                                         disabled={exportSaving}
                                         className="inline-flex items-center gap-2 text-white font-bold px-5 py-2.5 rounded-lg bg-gradient-to-r from-primary-start to-primary-end disabled:opacity-50 transition-opacity"
                                     >
@@ -432,29 +489,33 @@ export function EstablishmentDetailPage() {
                                 </div>
                             )}
 
-                            {/* Premier pop-up : résumé court, inchangé. */}
                             <ConfirmationModal
                                 isOpen={exportConfirmStep === 1}
-                                onClose={() => setExportConfirmStep((step) => (step === 1 ? 0 : step))}
+                                onClose={cancelExportChange}
                                 onConfirm={() => setExportConfirmStep(2)}
-                                title="Confirmer la modification"
-                                message={`Le partage des données cliniques sera ${draftExportAllowed ? "autorisé" : "désactivé"}.`}
+                                title={draftExportAllowed ? "Confirmer l’activation" : "Désactiver le partage des données cliniques ?"}
+                                message={draftExportAllowed
+                                    ? "Le partage des données cliniques sera autorisé pour le périmètre prévu par la plateforme."
+                                    : "L’établissement cessera d’alimenter le mécanisme de partage/export pour les échanges futurs prévus par la plateforme. Cette désactivation ne supprime pas nécessairement des données déjà transmises ou déjà traitées."}
                                 confirmText="Continuer"
                                 cancelText="Annuler"
+                                closeAfterConfirm={false}
                             />
-                            {/* Second pop-up : explicite sur l'effet immédiat (Cycle de vie du tenant, Phase 3). */}
                             <ConfirmationModal
                                 isOpen={exportConfirmStep === 2}
-                                onClose={() => setExportConfirmStep(0)}
+                                onClose={cancelExportChange}
                                 onConfirm={handleExportConfirmed}
                                 title={draftExportAllowed
                                     ? "Voulez-vous vraiment autoriser le partage des données cliniques ?"
                                     : "Voulez-vous vraiment désactiver le partage des données cliniques ?"}
                                 message={draftExportAllowed
                                     ? "Cette action autorisera immédiatement le partage des données cliniques anonymisées de cet établissement."
-                                    : "Cette action désactivera immédiatement le partage des données cliniques anonymisées de cet établissement."}
+                                    : "Confirmez que vous comprenez que seules les transmissions futures sont arrêtées ; cette action ne supprime pas les données déjà traitées."}
                                 confirmText={draftExportAllowed ? "Oui, autoriser" : "Oui, désactiver"}
                                 cancelText="Annuler"
+                                requireTypedConfirmation={draftExportAllowed ? null : "DESACTIVER"}
+                                acknowledgementLabel={draftExportAllowed ? null : "Je confirme avoir lu et compris les conséquences de la désactivation du partage des données cliniques."}
+                                closeAfterConfirm={false}
                             />
                         </div>
 

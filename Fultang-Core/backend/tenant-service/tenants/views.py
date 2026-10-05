@@ -50,7 +50,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .internal_clients import AdminProvisioningError, create_first_admin, get_tenant_admin_emails
+from .internal_clients import (
+    AdminProvisioningError, create_first_admin, get_primary_tenant_admin, update_primary_tenant_admin,
+    get_tenant_admin_emails, resend_admin_activation,
+)
 from .emails import (
     send_tenant_admin_welcome_email,
     send_tenant_suspended_email,
@@ -183,12 +186,18 @@ class TenantViewSet(mixins.CreateModelMixin,
 
         if 'allow_clinical_agent_export' in data:
             new_value = data.pop('allow_clinical_agent_export')
-            tenant = self.service.set_clinical_agent_export_authorization(tenant.id, new_value)
+            policy_accepted = data.pop('clinical_data_sharing_policy_accepted', False)
+            tenant = self.service.set_clinical_data_sharing(
+                tenant.id, allowed=new_value, policy_accepted=policy_accepted,
+            )
             self._log(
                 AdminAction.TENANT_TECHNICAL_CONFIG_UPDATED, tenant,
                 f"Partage des données cliniques {'autorisé' if new_value else 'désactivé'}.",
                 allow_clinical_agent_export=new_value,
             )
+        elif 'clinical_data_sharing_policy_accepted' in data:
+            # L'acceptation seule n'active jamais le partage.
+            data.pop('clinical_data_sharing_policy_accepted')
         if data:
             tenant = self.service.update_profile(tenant.id, **data)
             self._log(
@@ -426,11 +435,13 @@ class TenantViewSet(mixins.CreateModelMixin,
             result = create_first_admin(
                 tenant.id, nom=payload['nom'], prenom=payload.get('prenom', ''), email=admin_email,
             )
-            admin_created = True
+            admin_created = bool(result.get('created', True))
+            admin_exists = not admin_created
             activation_token = result.get('activation_token')
         except AdminProvisioningError as exc:
             admin_detail = str(exc)
             activation_token = None
+            admin_exists = False
 
         if admin_created and activation_token:
             establishment_url = settings.TENANT_ESTABLISHMENT_URL_TEMPLATE.format(identifier=tenant.identifier)
@@ -458,10 +469,47 @@ class TenantViewSet(mixins.CreateModelMixin,
         return Response({
             'tenant': str(tenant.id),
             'admin_created': admin_created,
+            'admin_exists': admin_exists,
             'admin_detail': admin_detail,
             'email_sent': email_sent,
             'email_detail': email_detail,
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get', 'patch'], url_path='primary-admin')
+    def primary_admin(self, request, id=None):
+        """Expose le profil minimal du premier admin, jamais ses secrets."""
+        tenant = self.get_object()
+        if request.method == 'PATCH':
+            payload = {key: request.data[key] for key in ('nom', 'prenom', 'email', 'username') if key in request.data}
+            try:
+                return Response(update_primary_tenant_admin(tenant.id, payload))
+            except AdminProvisioningError as exc:
+                message = str(exc)
+                return Response({'detail': message}, status=status.HTTP_409_CONFLICT if '409' in message else status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(get_primary_tenant_admin(tenant.id))
+        except AdminProvisioningError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+    @action(detail=True, methods=['post'], url_path='resend-admin-activation')
+    def resend_admin_activation(self, request, id=None):
+        tenant = self.get_object()
+        try:
+            result = resend_admin_activation(tenant.id, email=request.data.get('email'))
+        except AdminProvisioningError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_409_CONFLICT)
+        if not result.get('activation_token'):
+            return Response({'detail': "Ce compte n'est pas en attente d'activation."}, status=status.HTTP_409_CONFLICT)
+        establishment_url = settings.TENANT_ESTABLISHMENT_URL_TEMPLATE.format(identifier=tenant.identifier)
+        activation_url = f"{establishment_url}/activation-admin?tenant_id={tenant.id}&token={result['activation_token']}"
+        try:
+            send_tenant_admin_welcome_email(
+                tenant_name=tenant.name, establishment_url=establishment_url,
+                admin_email=result['email'], activation_url=activation_url,
+            )
+        except Exception as exc:
+            return Response({'detail': "Le nouvel email d'activation n'a pas pu être envoyé.", 'error': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'email_sent': True, 'email': result['email']})
 
     @action(detail=False, methods=['get'], url_path='resolve', permission_classes=[IsInternalService])
     def resolve(self, request):

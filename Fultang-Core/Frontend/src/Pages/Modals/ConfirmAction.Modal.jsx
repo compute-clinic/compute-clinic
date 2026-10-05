@@ -23,7 +23,7 @@ import { useState } from "react";
  * backend (voir chaque appelant : `confirmation_value` envoyé à l'API,
  * jamais une confiance dans ce seul contrôle client).
  */
-export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message, confirmText = "Confirm", cancelText = "Cancel", requireTypedConfirmation = null }) {
+export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message, confirmText = "Confirm", cancelText = "Cancel", requireTypedConfirmation = null, acknowledgementLabel = null, closeAfterConfirm = true }) {
 
 
     ConfirmationModal.propTypes = {
@@ -35,16 +35,20 @@ export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message,
         confirmText: PropTypes.string,
         cancelText: PropTypes.string,
         requireTypedConfirmation: PropTypes.string,
+        acknowledgementLabel: PropTypes.string,
+        closeAfterConfirm: PropTypes.bool,
     }
 
     const [typedValue, setTypedValue] = useState("");
+    const [acknowledged, setAcknowledged] = useState(false);
 
     if (!isOpen) return null;
 
-    const isConfirmDisabled = requireTypedConfirmation !== null && typedValue !== requireTypedConfirmation;
+    const isConfirmDisabled = (requireTypedConfirmation !== null && typedValue !== requireTypedConfirmation) || (acknowledgementLabel !== null && !acknowledged);
 
     const handleClose = () => {
         setTypedValue("");
+        setAcknowledged(false);
         onClose();
     };
 
@@ -85,14 +89,21 @@ export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message,
                         />
                     </div>
                 )}
+                {acknowledgementLabel !== null && (
+                    <label className="flex items-start gap-2 mb-6 text-sm text-gray-700 cursor-pointer">
+                        <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-end focus:ring-primary-end accent-primary-end" />
+                        <span>{acknowledgementLabel}</span>
+                    </label>
+                )}
                 <div className="flex justify-end space-x-3">
                     <button
                         disabled={isConfirmDisabled}
                         onClick={() => {
                             if (isConfirmDisabled) return;
                             setTypedValue("");
+                            setAcknowledged(false);
                             onConfirm();
-                            onClose();
+                            if (closeAfterConfirm) onClose();
                         }}
                         className="px-4 py-2 bg-primary-end text-white rounded-lg text-md hover:text-xl font-bold transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-md"
                     >
@@ -109,4 +120,3 @@ export function ConfirmationModal ({ isOpen, onClose, onConfirm, title, message,
         </div>
     );
 }
-

@@ -914,9 +914,55 @@ class CreateFirstAdminEndpointTests(APITestCase):
         )
         self.assertEqual(second_activate.status_code, status.HTTP_409_CONFLICT)
 
-    def test_duplicate_email_in_same_tenant_returns_409(self):
+    def test_duplicate_email_in_same_tenant_is_idempotent(self):
         self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'email': 'dup@example.test'})
         response = self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Autre', 'email': 'dup@example.test'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['created'])
+        self.assertEqual(Admin.objects.using('default').filter(tenant_id=CREATE_ADMIN_TENANT, email='dup@example.test').count(), 1)
+
+    def test_resend_activation_keeps_account_and_invalidates_old_link(self):
+        created = self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'email': 'resend@example.test'})
+        old_token = created.data['activation_token']
+        response = self.client.post(
+            '/api/internal/resend-admin-activation/',
+            {'tenant_id': CREATE_ADMIN_TENANT, 'email': 'resend@example.test'}, format='json',
+            HTTP_X_INTERNAL_SERVICE_TOKEN='test-internal-token',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(response.data['activation_token'], old_token)
+        self.assertEqual(Admin.objects.using('default').filter(tenant_id=CREATE_ADMIN_TENANT, email='resend@example.test').count(), 1)
+        old_attempt = self.client.get('/api/activate-admin/verify/', {'tenant_id': CREATE_ADMIN_TENANT, 'token': old_token})
+        self.assertEqual(old_attempt.status_code, status.HTTP_409_CONFLICT)
+        new_attempt = self.client.get('/api/activate-admin/verify/', {'tenant_id': CREATE_ADMIN_TENANT, 'token': response.data['activation_token']})
+        self.assertEqual(new_attempt.status_code, status.HTTP_200_OK)
+
+    def test_primary_admin_update_persists_without_exposing_secrets(self):
+        self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'email': 'edit-admin@example.test'})
+        response = self.client.patch(
+            '/api/internal/primary-tenant-admin/',
+            {'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Durand', 'prenom': 'Jeanne', 'email': 'jeanne@example.test', 'username': 'j.durand'},
+            format='json', HTTP_X_INTERNAL_SERVICE_TOKEN='test-internal-token',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        admin = response.data['admin']
+        self.assertEqual(admin['nom'], 'Durand')
+        self.assertEqual(admin['username'], 'j.durand')
+        self.assertNotIn('mot_de_passe', admin)
+        self.assertNotIn('activation_token', admin)
+        persisted = Admin.objects.using('default').get(email='jeanne@example.test')
+        self.assertEqual(persisted.nom, 'Durand')
+
+    def test_resend_activation_is_refused_after_account_activation(self):
+        created = self._post({'tenant_id': CREATE_ADMIN_TENANT, 'nom': 'Dupont', 'email': 'activated-no-resend@example.test'})
+        self.client.post('/api/activate-admin/activate/', {
+            'tenant_id': CREATE_ADMIN_TENANT, 'token': created.data['activation_token'], 'username': 'no.resend',
+            'password': 'MotDePasse2026!', 'password_confirm': 'MotDePasse2026!',
+        }, format='json')
+        response = self.client.post(
+            '/api/internal/resend-admin-activation/', {'tenant_id': CREATE_ADMIN_TENANT}, format='json',
+            HTTP_X_INTERNAL_SERVICE_TOKEN='test-internal-token',
+        )
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
 
     def test_admin_is_correctly_associated_with_its_tenant_never_cross_tenant(self):

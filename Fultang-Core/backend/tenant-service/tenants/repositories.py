@@ -54,7 +54,7 @@ class TenantRepository:
         Persiste un nouveau tenant avec le statut par défaut (ACTIVE).
 
         `allow_clinical_agent_export` est optionnel : si non fourni, le
-        défaut du modèle (`True`) s'applique — un appelant qui ne connaît
+        défaut du modèle (`False`) s'applique — un appelant qui ne connaît
         pas encore ce champ (scripts existants, tests plus anciens)
         continue de fonctionner sans modification. `profile_fields` ne
         retient que les clés reconnues (`address`/`phone`/`email`/
@@ -75,6 +75,14 @@ class TenantRepository:
         tenant = self.get_by_id(tenant_id)
         tenant.allow_clinical_agent_export = value
         tenant.save(update_fields=['allow_clinical_agent_export'])
+        return tenant
+
+    def update_clinical_data_sharing(self, tenant_id: UUID, *, allowed: bool, policy_accepted: bool = False) -> Tenant:
+        tenant = self.get_by_id(tenant_id)
+        tenant.allow_clinical_agent_export = allowed
+        if policy_accepted:
+            tenant.clinical_data_sharing_policy_accepted = True
+        tenant.save(update_fields=['allow_clinical_agent_export', 'clinical_data_sharing_policy_accepted'])
         return tenant
 
     def update_profile(self, tenant_id: UUID, **profile_fields) -> Tenant:

@@ -7,6 +7,7 @@ from .views import (
     PrimeViewSet, ProvisionDatabaseView, CreateFirstAdminView, FunctionalServiceInvalidateView,
     ArchiveTenantDataView, DeprovisionTenantDataView,
     AdminActivationVerifyView, AdminActivationCompleteView, TenantAdminEmailsView,
+    PrimaryTenantAdminView, ResendAdminActivationView,
 )
 
 router = DefaultRouter()
@@ -29,6 +30,8 @@ urlpatterns = [
     path('auth/verify/', AuthVerifyView.as_view(), name='auth-verify'),
     path('internal/provision-database/', ProvisionDatabaseView.as_view(), name='internal-provision-database'),
     path('internal/create-first-admin/', CreateFirstAdminView.as_view(), name='internal-create-first-admin'),
+    path('internal/primary-tenant-admin/', PrimaryTenantAdminView.as_view(), name='internal-primary-tenant-admin'),
+    path('internal/resend-admin-activation/', ResendAdminActivationView.as_view(), name='internal-resend-admin-activation'),
     path('activate-admin/verify/', AdminActivationVerifyView.as_view(), name='activate-admin-verify'),
     path('activate-admin/activate/', AdminActivationCompleteView.as_view(), name='activate-admin-complete'),
     path(

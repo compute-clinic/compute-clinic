@@ -28,6 +28,8 @@ from .tenant_routing.pool_registry import (
 )
 from .tenant_routing.router import TENANT_SCOPED_APPS
 from django.db import IntegrityError
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 
 class TemporaryPasswordResponseMixin:
     """
@@ -909,6 +911,13 @@ class CreateFirstAdminView(APIView):
 
         set_tenant_context(tenant_id)
 
+        existing_admin = Admin.objects.filter(tenant_id=tenant_id, email=email).first()
+        if existing_admin:
+            return Response({
+                'id': str(existing_admin.id_personnel), 'email': existing_admin.email,
+                'created': False, 'activation_token': None, 'activation_expires_at': None,
+            }, status=status.HTTP_200_OK)
+
         # Mot de passe de remplissage temporaire pour la contrainte NOT NULL
         # du champ — jamais communiqué à quiconque, jamais utilisable :
         # `compte_active=False` bloque toute connexion (voir AuthVerifyView)
@@ -943,9 +952,98 @@ class CreateFirstAdminView(APIView):
         return Response({
             'id': str(admin.id_personnel),
             'email': admin.email,
+            'created': True,
             'activation_token': activation_token.token,
             'activation_expires_at': activation_token.expires_at.isoformat(),
         }, status=status.HTTP_201_CREATED)
+
+
+class PrimaryTenantAdminView(APIView):
+    """Profil affichable du premier admin, limité à des données non sensibles."""
+    authentication_classes = []
+    permission_classes = [IsInternalService]
+
+    @staticmethod
+    def _serialize(admin):
+        return {
+            'nom': admin.nom, 'prenom': admin.prenom, 'email': admin.email,
+            'username': admin.username or '',
+            'role': admin.__class__.__name__.upper(),
+            'account_status': 'ACTIVE' if admin.compte_active else 'PENDING_ACTIVATION',
+            'activation_pending': not admin.compte_active,
+        }
+
+    def get(self, request):
+        tenant_id = request.query_params.get('tenant_id')
+        if not tenant_id:
+            return Response({'detail': "Le paramètre 'tenant_id' est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        set_tenant_context(tenant_id)
+        admin = Admin.objects.filter(tenant_id=tenant_id).order_by('id_personnel').first()
+        if admin is None:
+            return Response({'admin': None})
+        return Response({'admin': self._serialize(admin)})
+
+    def patch(self, request):
+        tenant_id = request.data.get('tenant_id')
+        if not tenant_id:
+            return Response({'detail': "Le champ 'tenant_id' est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        set_tenant_context(tenant_id)
+        admin = Admin.objects.filter(tenant_id=tenant_id).order_by('id_personnel').first()
+        if admin is None:
+            return Response({'detail': "Aucun administrateur n'existe pour cet établissement."}, status=status.HTTP_404_NOT_FOUND)
+
+        allowed = {'nom', 'prenom', 'email', 'username'}
+        updates = {key: request.data[key].strip() for key in allowed if key in request.data and isinstance(request.data[key], str)}
+        if not updates:
+            return Response({'detail': "Au moins un champ modifiable est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        if 'email' in updates:
+            try:
+                validate_email(updates['email'])
+            except ValidationError:
+                return Response({'email': ["Adresse email invalide."]}, status=status.HTTP_400_BAD_REQUEST)
+            if Admin.objects.filter(tenant_id=tenant_id, email=updates['email']).exclude(pk=admin.pk).exists():
+                return Response({'email': ["Cette adresse email est déjà utilisée dans cet établissement."]}, status=status.HTTP_409_CONFLICT)
+        if 'username' in updates:
+            username = updates['username']
+            if username and not AdminActivationCompleteView._USERNAME_RE.match(username):
+                return Response({'username': ["Le nom d'utilisateur est invalide."]}, status=status.HTTP_400_BAD_REQUEST)
+            if username and Admin.objects.filter(tenant_id=tenant_id, username=username).exclude(pk=admin.pk).exists():
+                return Response({'username': ["Ce nom d'utilisateur est déjà utilisé dans cet établissement."]}, status=status.HTTP_409_CONFLICT)
+            updates['username'] = username or None
+        for field, value in updates.items():
+            setattr(admin, field, value)
+        try:
+            admin.save(update_fields=list(updates))
+        except IntegrityError:
+            return Response({'detail': "Email ou nom d'utilisateur déjà utilisé dans cet établissement."}, status=status.HTTP_409_CONFLICT)
+        return Response({'admin': self._serialize(admin)})
+
+
+class ResendAdminActivationView(APIView):
+    """Émet un nouveau lien pour le même compte, sans créer d'administrateur."""
+    authentication_classes = []
+    permission_classes = [IsInternalService]
+
+    def post(self, request):
+        tenant_id = request.data.get('tenant_id')
+        email = request.data.get('email')
+        if not tenant_id:
+            return Response({'detail': "Le champ 'tenant_id' est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        set_tenant_context(tenant_id)
+        admins = Admin.objects.filter(tenant_id=tenant_id)
+        admin = admins.filter(email=email).first() if email else admins.order_by('id_personnel').first()
+        if admin is None:
+            return Response({'detail': "Aucun administrateur n'existe pour cet établissement."}, status=status.HTTP_404_NOT_FOUND)
+        if admin.compte_active:
+            return Response({'detail': "Ce compte est déjà activé."}, status=status.HTTP_409_CONFLICT)
+        # Un lien remplacé ne reste pas valide : aucun token antérieur ne peut être réutilisé.
+        AdminActivationToken.objects.filter(admin=admin, used_at__isnull=True).update(used_at=timezone.now())
+        activation_token = AdminActivationToken.objects.create(admin=admin, tenant_id=tenant_id)
+        return Response({
+            'id': str(admin.id_personnel), 'email': admin.email,
+            'activation_token': activation_token.token,
+            'activation_expires_at': activation_token.expires_at.isoformat(),
+        })
 
 
 def _resolve_activation_token(tenant_id, token):

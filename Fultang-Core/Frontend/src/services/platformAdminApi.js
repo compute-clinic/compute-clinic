@@ -167,6 +167,21 @@ export const provisionTenantAdmin = async (id, payload) => {
     return response.data;
 };
 
+export const getPrimaryTenantAdmin = async (id) => {
+    const response = await axiosInstance.get(`${BASE_URL()}/tenants/${id}/primary-admin/`);
+    return response.data.admin;
+};
+
+export const updatePrimaryTenantAdmin = async (id, payload) => {
+    const response = await axiosInstance.patch(`${BASE_URL()}/tenants/${id}/primary-admin/`, payload);
+    return response.data.admin;
+};
+
+export const resendTenantAdminActivation = async (id, email) => {
+    const response = await axiosInstance.post(`${BASE_URL()}/tenants/${id}/resend-admin-activation/`, email ? { email } : {});
+    return response.data;
+};
+
 /**
  * Envoie (remplace) le logo d'un tenant.
  * @param {string} id

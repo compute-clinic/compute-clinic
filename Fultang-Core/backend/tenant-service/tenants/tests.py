@@ -124,13 +124,12 @@ class TenantAPITests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_new_tenant_defaults_to_export_allowed(self):
-        """§6 de la tâche : la valeur par défaut doit être True, y compris via l'API de création."""
+    def test_new_tenant_defaults_to_export_disabled_until_policy_is_accepted(self):
         response = self.client.post(
             '/api/tenants/', {'name': 'Clinique Fultang', 'identifier': 'fultang'}, format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(response.data['allow_clinical_agent_export'])
+        self.assertFalse(response.data['allow_clinical_agent_export'])
 
     def test_create_tenant_can_explicitly_disable_export(self):
         response = self.client.post(
@@ -141,16 +140,27 @@ class TenantAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertFalse(response.data['allow_clinical_agent_export'])
 
-    def test_update_export_authorization(self):
+    def test_update_export_authorization_requires_policy_acceptance(self):
         tenant = Tenant.objects.create(name='Clinique Fultang', identifier='fultang')
-        self.assertTrue(tenant.allow_clinical_agent_export)
+        self.assertFalse(tenant.allow_clinical_agent_export)
 
         response = self.client.patch(
-            f'/api/tenants/{tenant.id}/', {'allow_clinical_agent_export': False}, format='json',
+            f'/api/tenants/{tenant.id}/', {'allow_clinical_agent_export': True}, format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        tenant.refresh_from_db()
+        self.assertFalse(tenant.allow_clinical_agent_export)
+
+        response = self.client.patch(
+            f'/api/tenants/{tenant.id}/', {
+                'allow_clinical_agent_export': True,
+                'clinical_data_sharing_policy_accepted': True,
+            }, format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         tenant.refresh_from_db()
-        self.assertFalse(tenant.allow_clinical_agent_export)
+        self.assertTrue(tenant.allow_clinical_agent_export)
+        self.assertTrue(tenant.clinical_data_sharing_policy_accepted)
 
     def test_update_export_authorization_does_not_touch_status_or_identifier(self):
         """TenantUpdateSerializer n'expose que allow_clinical_agent_export — le reste est ignoré, pas une erreur 400."""
