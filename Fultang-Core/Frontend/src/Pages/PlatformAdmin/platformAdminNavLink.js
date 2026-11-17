@@ -1,4 +1,4 @@
-import { LayoutDashboard } from "lucide-react";
+import { LayoutDashboard, Building2 } from "lucide-react";
 import { AppRoutesPaths as appRoutes } from "../../Router/appRouterPaths.js";
 
 /**
@@ -15,5 +15,10 @@ export const platformAdminNavLink = [
         name: "Dashboard",
         link: appRoutes.platformAdminDashboardPage,
         icon: LayoutDashboard,
+    },
+    {
+        name: "Services établissements",
+        link: appRoutes.platformAdminServiceDemandes,
+        icon: Building2,
     },
 ];

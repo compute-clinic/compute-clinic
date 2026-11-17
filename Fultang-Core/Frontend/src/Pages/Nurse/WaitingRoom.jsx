@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CustomDashboard } from "../../GlobalComponents/CustomDashboard.jsx";
 import { nurseNavLink } from "./nurseNavLink.js";
@@ -7,37 +7,40 @@ import { Loading } from "../../GlobalComponents/Loading.jsx";
 import { nurseApi } from "../../services/nurseApi.js";
 import { prendreVisiteEnCharge } from "../../services/visiteApi.js";
 import { AppRoutesPaths } from "../../Router/appRouterPaths.js";
-import { Clock, Activity, FileText, ChevronRight } from 'lucide-react';
+import { useAuthentication } from "../../Utils/Provider.jsx";
+import { useAutoRefresh } from "../../hooks/usePolling.js";
+import { Clock, Activity, FileText, ChevronRight, RefreshCw } from 'lucide-react';
 
 export const WaitingRoom = () => {
     const [patients, setPatients] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const navigate = useNavigate();
+    const { userData } = useAuthentication();
+    const serviceLabel = userData?.service_nom || '—';
+
+    const fetchWaitingPatients = useCallback(async (silent = false) => {
+        try {
+            if (!silent) setIsLoading(true);
+            setError("");
+            const data = await nurseApi.getWaitingPatients();
+            setPatients(Array.isArray(data) ? data : []);
+        } catch (err) {
+            console.error(err);
+            setPatients([]);
+            setError(err.message || "Impossible de charger la salle d'attente.");
+        } finally {
+            if (!silent) setIsLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
         fetchWaitingPatients();
-    }, []);
+    }, [fetchWaitingPatients]);
 
-    const fetchWaitingPatients = async () => {
-        try {
-            setIsLoading(true);
-            const data = await nurseApi.getWaitingPatients();
-            setPatients(data);
-        } catch (err) {
-            setError("Impossible de charger la liste des patients en attente.");
-        } finally {
-            setIsLoading(false);
-        }
-    };
+    useAutoRefresh(() => fetchWaitingPatients(true), 8000);
 
     const handleTakeParameters = async (item) => {
-        if (!item.mode_urgence && (item.paiement_valide === false || item.paiement_actif === false)) {
-            setError(item.paiement_valide
-                ? 'CORR-A2-002 : paiement expiré — orientez le patient vers la caisse.'
-                : 'RG-CF-001 : consultation non payée — orientez le patient vers la caisse.');
-            return;
-        }
         try {
             await prendreVisiteEnCharge(item.id);
             navigate(AppRoutesPaths.patientDetailsPage.replace(':id', item.patient.id) + `?visite=${item.id}`);
@@ -61,11 +64,25 @@ export const WaitingRoom = () => {
                     <div className="flex justify-between items-center mb-6">
                         <div>
                             <h2 className="text-2xl font-bold text-gray-800">Salle d'attente</h2>
-                            <p className="text-sm text-gray-500 mt-1">Gestion des arrivées et paramètres vitaux</p>
+                            <p className="text-sm text-gray-500 mt-1">
+                                Service : <span className="font-semibold text-gray-700">{serviceLabel}</span>
+                                {' · '}
+                                Réception → triage ici → médecin du service
+                            </p>
                         </div>
-                        <div className="bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg font-medium flex items-center shadow-sm">
-                            <Activity className="w-4 h-4 mr-2 text-gray-400" />
-                            {patients.length} patient{patients.length > 1 ? 's' : ''} en attente
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => fetchWaitingPatients()}
+                                className="p-2.5 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600"
+                                title="Actualiser"
+                            >
+                                <RefreshCw className="w-5 h-5" />
+                            </button>
+                            <div className="bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg font-medium flex items-center shadow-sm">
+                                <Activity className="w-4 h-4 mr-2 text-gray-400" />
+                                {patients.length} patient{patients.length > 1 ? 's' : ''} en attente
+                            </div>
                         </div>
                     </div>
 
@@ -109,8 +126,8 @@ export const WaitingRoom = () => {
                                                                 <span className="ml-2 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">Urgence</span>
                                                             )}
                                                         </div>
-                                                        <div className="text-xs text-gray-400 font-mono mt-0.5">
-                                                            {item.patient.matricule || "—"}
+                                                        <div className="text-xs text-primary-end font-mono font-semibold mt-0.5">
+                                                            {item.patient.code_identifiant || item.patient.matricule || "—"}
                                                         </div>
                                                     </td>
                                                     <td className="p-4">

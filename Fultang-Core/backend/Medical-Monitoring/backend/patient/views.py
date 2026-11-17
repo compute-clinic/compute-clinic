@@ -4,9 +4,10 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from .pagination import PatientPagePagination
 from .models import (
-    Patient, Adresse, Contact, Nationalite, 
-    PersonneAPrevenir, LienParente
+    Patient, Adresse, Contact, Nationalite,
+    PersonneAPrevenir, LienParente, PatientAccessLog,
 )
+from .access_log_serializers import PatientAccessLogSerializer
 from .serializers import (
     PatientSerializer, PatientListSerializer, AdresseSerializer, 
     ContactSerializer, NationaliteSerializer, PersonneAPrevenirSerializer,
@@ -25,6 +26,11 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        from medical_workflow.models import Visite
+        from medical_workflow.scope import appliquer_portee_service, est_isole_par_service, request_roles
+        if est_isole_par_service(request_roles(self.request)):
+            visites = appliquer_portee_service(Visite.objects.all(), self.request)
+            qs = qs.filter(id__in=visites.values_list('patient_id', flat=True))
         params = self.request.query_params
 
         birth_year = params.get('birth_year')
@@ -55,6 +61,62 @@ class PatientViewSet(viewsets.ModelViewSet):
             return PatientListSerializer
         return super().get_serializer_class()
 
+    def _log_access(self, action, patient=None, resource=""):
+        PatientAccessLog.record(self.request, action, patient=patient, resource=resource)
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        search = request.query_params.get("search", "")
+        resource = "patients/"
+        if search:
+            resource = f"patients/?search={search[:120]}"
+        self._log_access(PatientAccessLog.Action.LIST, resource=resource)
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        patient = self.get_object()
+        response = super().retrieve(request, *args, **kwargs)
+        self._log_access(
+            PatientAccessLog.Action.READ,
+            patient=patient,
+            resource=f"patients/{patient.pk}/",
+        )
+        return response
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        patient_id = response.data.get("id")
+        patient = Patient.objects.filter(pk=patient_id).first() if patient_id else None
+        self._log_access(
+            PatientAccessLog.Action.CREATE,
+            patient=patient,
+            resource="patients/",
+        )
+        return response
+
+    def update(self, request, *args, **kwargs):
+        patient = self.get_object()
+        response = super().update(request, *args, **kwargs)
+        self._log_access(
+            PatientAccessLog.Action.UPDATE,
+            patient=patient,
+            resource=f"patients/{patient.pk}/",
+        )
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        patient = self.get_object()
+        pk = patient.pk
+        self._log_access(
+            PatientAccessLog.Action.DELETE,
+            patient=patient,
+            resource=f"patients/{pk}/",
+        )
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=False, methods=['get'], url_path='prochain-matricule')
     def prochain_matricule(self, request):
         """Retourne le prochain matricule disponible pour un nouveau patient."""
@@ -67,6 +129,11 @@ class PatientViewSet(viewsets.ModelViewSet):
         from patient_informations.serializers import PatientDossierSerializer
         patient = self.get_object()
         serializer = PatientDossierSerializer(patient)
+        self._log_access(
+            PatientAccessLog.Action.READ_DOSSIER,
+            patient=patient,
+            resource=f"patients/{patient.pk}/dossier/",
+        )
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='soins')
@@ -102,6 +169,11 @@ class PatientViewSet(viewsets.ModelViewSet):
             examens,
             many=True,
             context={'request': request},
+        )
+        self._log_access(
+            PatientAccessLog.Action.READ_EXAMENS,
+            patient=patient,
+            resource=f"patients/{patient.pk}/examens/",
         )
         return Response(serializer.data)
 
@@ -161,6 +233,28 @@ class PatientViewSet(viewsets.ModelViewSet):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class PatientAccessLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Journal de traçabilité — consultations et modifications dossier patient."""
+
+    queryset = PatientAccessLog.objects.all()
+    serializer_class = PatientAccessLogSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering = ["-created_at"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        if params.get("patient_code"):
+            qs = qs.filter(patient_code__icontains=params["patient_code"])
+        if params.get("patient_id"):
+            qs = qs.filter(patient_id=params["patient_id"])
+        if params.get("user_id"):
+            qs = qs.filter(user_id=params["user_id"])
+        if params.get("action"):
+            qs = qs.filter(action=params["action"])
+        return qs
+
 
 class AdresseViewSet(viewsets.ModelViewSet):
     """Gestion des adresses physiques."""

@@ -41,11 +41,17 @@ class TypeSortie(models.TextChoices):
 
 
 class StatutHospitalisation(models.TextChoices):
-    """Statuts possibles pour une hospitalisation."""
-    EN_ATTENTE_LIT = 'EN_ATTENTE_LIT', _('En attente de lit')
+    """
+    Statuts possibles pour une hospitalisation.
+    Parcours : le médecin émet la demande (EN_ATTENTE_LIT) ; l'infirmier la reçoit
+    et confirme (EN_COURS) ou signale « pas d'hospitalisation » (REFUSEE) avec motif
+    (refus du patient, patient parti, etc.) — le motif remonte au médecin.
+    """
+    EN_ATTENTE_LIT = 'EN_ATTENTE_LIT', _('En attente de validation infirmier (lit)')
     EN_COURS = 'EN_COURS', _('En cours')
     EN_SORTIE = 'EN_SORTIE', _('En cours de sortie')
     TERMINE = 'TERMINE', _('Terminée')
+    REFUSEE = 'REFUSEE', _("Pas d'hospitalisation")
 
 class StatutVisite(models.TextChoices):
     """Statuts possibles pour un dossier de visite."""

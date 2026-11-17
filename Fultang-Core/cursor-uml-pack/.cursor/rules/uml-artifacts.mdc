@@ -1,0 +1,15 @@
+---
+description: Standards for UML artifact files and generated diagram source.
+globs: ["**/*.puml", "**/*.plantuml", "**/*.iuml", "**/*.mmd"]
+alwaysApply: false
+---
+
+# UML Artifact Standards
+
+- Keep diagram source readable and logically grouped.
+- Add a short title and a clear purpose where the notation/tool supports it.
+- Do not hide modeling errors behind styling.
+- Keep names consistent with the project vocabulary.
+- Avoid unnecessary colors, icons, or layout tricks.
+- For PlantUML, prefer stable constructs over obscure syntax.
+- If a diagram becomes too large, split it by concern/use case rather than shrinking everything.

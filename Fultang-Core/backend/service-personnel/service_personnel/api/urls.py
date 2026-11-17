@@ -6,6 +6,7 @@ from .views import (
     PharmacienViewSet, DirecteurViewSet, AdminViewSet, AuthVerifyView, PersonnelViewSet,
     PrimeViewSet, ProvisionDatabaseView,
 )
+from .demande_service_views import DemandeServiceViewSet
 
 router = DefaultRouter()
 router.register(r'services', ServiceViewSet)
@@ -21,6 +22,7 @@ router.register(r'directeurs', DirecteurViewSet)
 router.register(r'admins', AdminViewSet)
 router.register(r'personnel', PersonnelViewSet, basename='personnel')
 router.register(r'primes', PrimeViewSet)
+router.register(r'demandes-services', DemandeServiceViewSet, basename='demande-service')
 
 urlpatterns = [
     path('auth/verify/', AuthVerifyView.as_view(), name='auth-verify'),

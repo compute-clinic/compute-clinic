@@ -23,6 +23,12 @@ class Examen(models.Model):
         default=StatutExamen.EN_ATTENTE,
         verbose_name=_("Statut")
     )
+    medecin_prescripteur_nom = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        verbose_name=_("Nom du médecin prescripteur"),
+    )
 
     class Meta:
         verbose_name = _("Examen")

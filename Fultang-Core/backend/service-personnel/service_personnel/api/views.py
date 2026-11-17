@@ -5,12 +5,14 @@ from drf_spectacular.utils import extend_schema, extend_schema_view
 from .models import (
     Service, Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, 
     ComptableFinancier, ComptableMatiere, Laborantin, 
-    Pharmacien, Directeur, Admin, Prime
+    Pharmacien, Directeur, Admin, ResponsableRH, Prime, DocumentPersonnel,
+    TypeDocumentPersonnel,
 )
 from .serializers import (
     ServiceSerializer, MedecinSerializer, MedecinGeneralisteSerializer, InfirmiereSerializer, ReceptionnisteSerializer, 
     ComptableFinancierSerializer, ComptableMatiereSerializer, LaborantinSerializer, 
-    PharmacienSerializer, DirecteurSerializer, AdminSerializer, PrimeSerializer
+    PharmacienSerializer, DirecteurSerializer, AdminSerializer, PrimeSerializer,
+    DocumentPersonnelSerializer,
 )
 from rest_framework.views import APIView
 from rest_framework import status
@@ -36,6 +38,17 @@ class ServiceViewSet(viewsets.ModelViewSet):
     queryset = Service.objects.all()
     serializer_class = ServiceSerializer
     pagination_class = None
+
+    _SERVICE_MUTATION_FORBIDDEN = (
+        "Création ou modification directe interdite pour l'établissement. "
+        "Soumettez une demande (admin local → signature directeur → CompuClinic)."
+    )
+
+    def create(self, request, *args, **kwargs):
+        return Response({'detail': self._SERVICE_MUTATION_FORBIDDEN}, status=status.HTTP_403_FORBIDDEN)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Suppression de service interdite via cette interface.'}, status=status.HTTP_403_FORBIDDEN)
 
     @extend_schema(
         summary="Récupérer les médecins d'un service",
@@ -71,7 +84,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
         personnel_models = [
             Medecin, MedecinGeneraliste, Infirmiere, Receptionniste,
             ComptableFinancier, ComptableMatiere, Laborantin,
-            Pharmacien, Directeur, Admin,
+            Pharmacien, Directeur, Admin, ResponsableRH,
         ]
         results = []
         for model in personnel_models:
@@ -292,7 +305,7 @@ class AuthVerifyView(APIView):
         # Liste des modèles de personnel à vérifier
         personnel_models = [
             Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier,
-            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin
+            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin, ResponsableRH,
         ]
 
         user = None
@@ -322,12 +335,15 @@ class AuthVerifyView(APIView):
             if canonical:
                 user_role = canonical
 
+            svc = getattr(user, 'service', None)
             return Response({
                 "id": user.id_personnel,
                 "email": user.email,
                 "roles": [user_role],
                 "nom": user.nom,
-                "prenom": user.prenom
+                "prenom": user.prenom,
+                "service_id": svc.id_service if svc else None,
+                "service_nom": svc.nom_service if svc else None,
             })
         
         return Response({"detail": "Identifiants invalides"}, status=status.HTTP_401_UNAUTHORIZED)
@@ -346,12 +362,49 @@ POSTE_MODEL_MAP = {
     'pharmacien': Pharmacien,
     'directeur': Directeur,
     'admin': Admin,
+    'rh': ResponsableRH,
 }
 
 CATEGORIE_POSTES = {
     'medical': {'medecin', 'infirmier', 'laborantin', 'pharmacien'},
-    'admin': {'receptioniste', 'caissier', 'comptable', 'directeur', 'admin'},
+    'admin': {'receptioniste', 'caissier', 'comptable', 'directeur', 'admin', 'rh'},
 }
+
+POSTES_RESERVES_HR = frozenset({'admin', 'directeur', 'rh'})
+ROLES_DOSSIER_RH = frozenset({'ResponsableRH', 'Admin', 'Directeur', 'PLATFORM_ADMIN'})
+PAPIERS_EXT_OK = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'}
+PAPIERS_TAILLE_MAX = 10 * 1024 * 1024
+
+
+def _roles_requete(request):
+    roles = set(getattr(getattr(request, 'user', None), 'roles', None) or [])
+    raw = request.META.get('HTTP_X_USER_ROLES', '') or ''
+    roles |= {r.strip() for r in raw.split(',') if r.strip()}
+    return roles
+
+
+def _peut_gerer_papiers(request):
+    return bool(_roles_requete(request) & ROLES_DOSSIER_RH)
+
+
+def _enrichir_nb_papiers(results):
+    from django.db.models import Count
+    if not results:
+        return results
+    try:
+        ids = [r['id'] for r in results if r.get('id')]
+        counts = {
+            str(row['personnel_id']): row['n']
+            for row in DocumentPersonnel.objects.filter(personnel_id__in=ids)
+            .values('personnel_id')
+            .annotate(n=Count('id'))
+        }
+        for row in results:
+            row['nb_papiers'] = counts.get(str(row.get('id')), 0)
+    except Exception:
+        for row in results:
+            row['nb_papiers'] = 0
+    return results
 
 
 def resolve_service(service_id):
@@ -421,7 +474,7 @@ class PersonnelViewSet(viewsets.ViewSet):
     def get_user_and_model(self, pk):
         personnel_models = [
             Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier, 
-            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin
+            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin, ResponsableRH,
         ]
         for model in personnel_models:
             try:
@@ -434,7 +487,7 @@ class PersonnelViewSet(viewsets.ViewSet):
     def list(self, request):
         personnel_models = [
             Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier, 
-            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin
+            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin, ResponsableRH,
         ]
         results = []
         service_id = request.query_params.get('service')
@@ -456,13 +509,15 @@ class PersonnelViewSet(viewsets.ViewSet):
                 if allowed_postes and serialized.get('poste') not in allowed_postes:
                     continue
                 results.append(serialized)
-        return Response(results)
+        return Response(_enrichir_nb_papiers(results))
 
     def retrieve(self, request, pk=None):
         user, model = self.get_user_and_model(pk)
         if not user:
             return Response({"detail": "Personnel introuvable"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(serialize_personnel(user, model))
+        data = serialize_personnel(user, model)
+        data['nb_papiers'] = DocumentPersonnel.objects.filter(personnel_id=user.id_personnel).count()
+        return Response(data)
 
     def create(self, request):
         data = request.data
@@ -485,6 +540,18 @@ class PersonnelViewSet(viewsets.ViewSet):
                     f"Valeurs autorisées : {', '.join(POSTE_MODEL_MAP.keys())}."
                 ]},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        requester_roles = getattr(request.user, 'roles', []) or []
+        if poste in POSTES_RESERVES_HR and not any(r in requester_roles for r in ('Admin', 'Directeur', 'PLATFORM_ADMIN')):
+            return Response(
+                {"poste": ["Ce poste ne peut être créé que par l'administrateur local ou le directeur."]},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if any(r == 'ResponsableRH' for r in requester_roles) and poste in POSTES_RESERVES_HR:
+            return Response(
+                {"poste": ["Le responsable RH ne peut pas créer ce type de compte."]},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         create_data = {
@@ -593,7 +660,7 @@ class PersonnelViewSet(viewsets.ViewSet):
             
         personnel_models = [
             Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier, 
-            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin
+            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin, ResponsableRH,
         ]
         for model in personnel_models:
             try:
@@ -608,20 +675,29 @@ class PersonnelViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['post'], url_path='change-password')
     def change_password(self, request):
-        email = request.data.get('email')
+        email = (
+            request.data.get('email')
+            or request.META.get('HTTP_X_USER_EMAIL')
+            or request.headers.get('X-User-Email')
+        )
         old_password = request.data.get('old_password')
         new_password = request.data.get('new_password')
-        
+
         if not email or not old_password or not new_password:
             return Response({"detail": "Email, ancien et nouveau mot de passe requis"}, status=status.HTTP_400_BAD_REQUEST)
-            
+
+        tenant_id = getattr(request.user, 'tenant_id', None) if getattr(request, 'user', None) else None
+
         personnel_models = [
-            Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier, 
-            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin
+            Medecin, MedecinGeneraliste, Infirmiere, Receptionniste, ComptableFinancier,
+            ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin, ResponsableRH,
         ]
         for model in personnel_models:
             try:
-                user = model.objects.get(email=email)
+                if tenant_id is not None:
+                    user = model.objects.get(email=email, tenant_id=tenant_id)
+                else:
+                    user = model.objects.get(email=email)
                 if check_password(old_password, user.mot_de_passe):
                     user.mot_de_passe = make_password(new_password)
                     user.save()
@@ -639,6 +715,75 @@ class PersonnelViewSet(viewsets.ViewSet):
             "consultations": 0,
             "rendezvous": 0
         })
+
+    @action(detail=True, methods=['get', 'post'], url_path='papiers')
+    def papiers(self, request, pk=None):
+        """Dossier RH : pièces scannées rattachées à l'agent."""
+        if not _peut_gerer_papiers(request):
+            return Response({"detail": "Réservé au responsable RH."}, status=status.HTTP_403_FORBIDDEN)
+        user, _model = self.get_user_and_model(pk)
+        if not user:
+            return Response({"detail": "Personnel introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'GET':
+            docs = DocumentPersonnel.objects.filter(personnel_id=user.id_personnel)
+            return Response(DocumentPersonnelSerializer(docs, many=True).data)
+
+        fichier = request.FILES.get('fichier')
+        if not fichier:
+            return Response({"fichier": ["Joignez un fichier (PDF, image ou Word)."]}, status=status.HTTP_400_BAD_REQUEST)
+        from pathlib import Path
+        ext = Path(fichier.name).suffix.lower()
+        if ext not in PAPIERS_EXT_OK:
+            return Response(
+                {"fichier": [f"Format non accepté ({ext}). Autorisés : PDF, JPG, PNG, DOC, DOCX."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if fichier.size and fichier.size > PAPIERS_TAILLE_MAX:
+            return Response({"fichier": ["Fichier trop volumineux (10 Mo maximum)."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        type_doc = (request.data.get('type_document') or TypeDocumentPersonnel.AUTRE).upper()
+        types_ok = {c.value for c in TypeDocumentPersonnel}
+        if type_doc not in types_ok:
+            type_doc = TypeDocumentPersonnel.AUTRE
+        deposant = getattr(request.user, 'id', None)
+        tenant_id = getattr(request.user, 'tenant_id', None)
+        doc = DocumentPersonnel.objects.create(
+            personnel_id=user.id_personnel,
+            tenant_id=tenant_id or getattr(user, 'tenant_id', None),
+            type_document=type_doc,
+            libelle=(request.data.get('libelle') or '').strip()[:255],
+            fichier=fichier,
+            depose_par_id=deposant,
+        )
+        return Response(DocumentPersonnelSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'delete'], url_path='papiers/(?P<doc_id>[^/.]+)')
+    def papier_detail(self, request, pk=None, doc_id=None):
+        if not _peut_gerer_papiers(request):
+            return Response({"detail": "Réservé au responsable RH."}, status=status.HTTP_403_FORBIDDEN)
+        user, _model = self.get_user_and_model(pk)
+        if not user:
+            return Response({"detail": "Personnel introuvable"}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            doc = DocumentPersonnel.objects.get(id=doc_id, personnel_id=user.id_personnel)
+        except (DocumentPersonnel.DoesNotExist, ValueError):
+            return Response({"detail": "Pièce introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'DELETE':
+            if doc.fichier:
+                doc.fichier.delete(save=False)
+            doc.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        from django.http import FileResponse
+        if not doc.fichier:
+            return Response({"detail": "Fichier absent."}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            doc.fichier.open('rb'),
+            as_attachment=True,
+            filename=doc.fichier.name.rsplit('/', 1)[-1],
+        )
 
 
 @extend_schema(tags=['Administration - Primes'])

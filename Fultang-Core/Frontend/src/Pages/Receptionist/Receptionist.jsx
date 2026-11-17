@@ -15,6 +15,9 @@ import {
     getSexeTagColor,
     getPatientContact,
     getPatientVille,
+    getPatientDisplayName,
+    getPatientInitial,
+    getPatientPublicId,
 } from "../../Utils/patientDisplay.js";
 
 export const Receptionist = () => {
@@ -45,12 +48,13 @@ export const Receptionist = () => {
     const currentYear = new Date().getFullYear();
     const yearOptions = Array.from({ length: 80 }, (_, i) => currentYear - i);
 
-    const fetchPatients = useCallback(async () => {
+    const fetchPatients = useCallback(async (pageOverride) => {
+        const page = pageOverride ?? currentPage;
         setIsSearching(true);
         setError(null);
         try {
             const params = {
-                page: currentPage,
+                page,
                 page_size: pageSize,
                 ordering: 'nom,prenom',
             };
@@ -90,6 +94,52 @@ export const Receptionist = () => {
             setIsSearching(false);
         }
     }, [searchQuery, currentPage, filterDateType, filterYear, filterMonth, filterDay]);
+
+    const handlePatientAdded = useCallback(async (created) => {
+        setSearchQuery('');
+        setFilterYear('');
+        setFilterMonth('');
+        setFilterDay('');
+        setCurrentPage(1);
+
+        if (!created?.id) {
+            await fetchPatients(1);
+            return;
+        }
+
+        setIsSearching(true);
+        setError(null);
+        try {
+            const params = { page: 1, page_size: pageSize, ordering: 'nom,prenom' };
+            const response = await axiosInstance.get('/patients/', { params });
+            const data = response.data;
+            let list = Array.isArray(data?.results) ? data.results : (Array.isArray(data) ? data : []);
+            const count = data?.count ?? list.length;
+
+            if (!list.some((p) => p.id === created.id)) {
+                const row = {
+                    id: created.id,
+                    matricule: created.matricule,
+                    nom: created.nom,
+                    prenom: created.prenom ?? '',
+                    sexe: created.sexe,
+                    date_naissance: created.date_naissance,
+                    code_identifiant: created.code_identifiant,
+                    contact_principal: created.contacts?.[0]?.numero,
+                    ville: created.adresse?.ville,
+                };
+                list = [row, ...list].slice(0, pageSize);
+            }
+
+            setPatients(list);
+            setTotalPatients(typeof count === 'number' ? count : list.length);
+        } catch (err) {
+            console.error('Erreur après création patient:', err);
+            await fetchPatients(1);
+        } finally {
+            setIsSearching(false);
+        }
+    }, [fetchPatients, pageSize]);
 
     const resetDateFilters = () => {
         setFilterYear('');
@@ -226,7 +276,7 @@ export const Receptionist = () => {
                         value={searchQuery} 
                         onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }} 
                         className="w-full pl-16 pr-6 py-5 bg-white border border-gray-100 rounded-[2rem] shadow-sm outline-none focus:ring-4 focus:ring-primary-start/10 transition-all text-gray-700 font-bold placeholder:text-gray-300" 
-                        placeholder="Rechercher par nom, matricule, téléphone..." 
+                        placeholder="Rechercher par nom, code patient, matricule, téléphone..." 
                     />
                 </div>
 
@@ -372,7 +422,7 @@ export const Receptionist = () => {
                 )}
 
                 {/* Modals */}
-                <AddNewPatientModal isOpen={isRegModalOpen} onClose={() => setIsRegModalOpen(false)} setCanOpenSuccessModal={setCanOpenSuccessModal} setSuccessMessage={setSuccessMessage} setIsLoading={setIsLoading} onPatientAdded={fetchPatients} />
+                <AddNewPatientModal isOpen={isRegModalOpen} onClose={() => setIsRegModalOpen(false)} setCanOpenSuccessModal={setCanOpenSuccessModal} setSuccessMessage={setSuccessMessage} setIsLoading={setIsLoading} onPatientAdded={handlePatientAdded} />
                 <CreateVisitModal isOpen={isVisitModalOpen} onClose={() => setIsVisitModalOpen(false)} patient={selectedPatient} setCanOpenSuccessModal={setCanOpenSuccessModal} setSuccessMessage={setSuccessMessage} />
                 <ViewPatientDetailsModal isOpen={isViewModalOpen} patient={selectedPatient} onClose={() => setIsViewModalOpen(false)} />
                 <EditPatientInfosModal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} patientData={selectedPatient} setCanOpenSuccessModal={setCanOpenSuccessModal} setSuccessMessage={setSuccessMessage} setIsLoading={setIsLoading} onUpdateSuccess={fetchPatients} />

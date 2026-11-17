@@ -518,6 +518,7 @@ def _decode_bearer_token(request: Request) -> Optional[dict]:
 # depuis le payload décodé (jamais depuis ce que le client a envoyé).
 _GATEWAY_INJECTED_HEADERS = {
     "x-user-id", "x-user-roles", "x-user-email", "x-user-nom", "x-user-prenom", "x-tenant-id",
+    "x-user-service-id", "x-user-service-nom",
 }
 
 
@@ -543,6 +544,10 @@ def _build_user_headers(headers: dict, payload: Optional[dict]) -> dict:
             headers["X-User-Nom"] = str(payload["nom"])
         if payload.get("prenom"):
             headers["X-User-Prenom"] = str(payload["prenom"])
+        if payload.get("service_id") not in (None, "", "None"):
+            headers["X-User-Service-Id"] = str(payload["service_id"])
+        if payload.get("service_nom"):
+            headers["X-User-Service-Nom"] = str(payload["service_nom"])
     return headers
 
 
@@ -627,6 +632,8 @@ async def login(credentials: LoginCredentials, request: Request):
             "email": user_data.get("email") or "",
             "nom": user_data.get("nom") or "",
             "prenom": user_data.get("prenom") or "",
+            "service_id": user_data.get("service_id"),
+            "service_nom": user_data.get("service_nom") or "",
         }
         access_token = create_access_token(data=token_claims)
         refresh_token = create_refresh_token(data=token_claims)
@@ -705,6 +712,8 @@ async def refresh_token(body: RefreshRequest):
         "email": payload.get("email") or "",
         "nom": payload.get("nom") or "",
         "prenom": payload.get("prenom") or "",
+        "service_id": payload.get("service_id"),
+        "service_nom": payload.get("service_nom") or "",
     })
 
     return {"access_token": new_access_token, "token_type": "bearer"}

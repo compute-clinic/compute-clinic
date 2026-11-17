@@ -163,3 +163,91 @@ class Admin(Personnel):
 
     def reinitialiserMotDePasse(self):
         pass
+
+
+class ResponsableRH(Personnel):
+    """Ressources humaines — recrutement et affectation (sans création de service)."""
+
+
+class TypeDocumentPersonnel(models.TextChoices):
+    CNI = 'CNI', "Pièce d'identité"
+    CV = 'CV', 'Curriculum vitae'
+    DIPLOME = 'DIPLOME', 'Diplôme'
+    CONTRAT = 'CONTRAT', 'Contrat de travail'
+    ATTESTATION = 'ATTESTATION', 'Attestation'
+    PHOTO = 'PHOTO', "Photo d'identité"
+    CERTIFICAT = 'CERTIFICAT', 'Certificat médical'
+    AUTRE = 'AUTRE', 'Autre'
+
+
+def _chemin_papier_personnel(instance, filename):
+    return f"papiers/{instance.personnel_id}/{filename}"
+
+
+class DocumentPersonnel(models.Model):
+    """Pièce du dossier RH d'un agent (recrutement et suivi)."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant_id = models.UUIDField(null=True, blank=True, editable=False, db_index=True)
+    personnel_id = models.UUIDField(db_index=True)
+    type_document = models.CharField(
+        max_length=20,
+        choices=TypeDocumentPersonnel.choices,
+        default=TypeDocumentPersonnel.AUTRE,
+    )
+    libelle = models.CharField(max_length=255, blank=True, default='')
+    fichier = models.FileField(upload_to=_chemin_papier_personnel)
+    date_depot = models.DateTimeField(auto_now_add=True)
+    depose_par_id = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Document personnel'
+        verbose_name_plural = 'Documents personnel'
+        ordering = ['-date_depot']
+
+    def __str__(self):
+        return f"{self.get_type_document_display()} — {self.personnel_id}"
+
+
+class StatutDemandeService(models.TextChoices):
+    SOUMISE = 'SOUMISE', 'Soumise au directeur'
+    SIGNEE_DIRECTEUR = 'SIGNEE_DIRECTEUR', 'Signée par le directeur'
+    ENVOYEE_PLATEFORME = 'ENVOYEE_PLATEFORME', 'Envoyée à CompuClinic'
+    APPROUVEE = 'APPROUVEE', 'Service créé'
+    REJETEE = 'REJETEE', 'Rejetée'
+
+
+class DemandeService(models.Model):
+    """
+    Demande d'ouverture d'un service hospitalier — le tenant ne crée pas
+    le service lui-même : validation directeur puis plateforme CompuClinic.
+    """
+    id_demande = models.AutoField(primary_key=True)
+    tenant_id = models.UUIDField(null=True, blank=True, db_index=True)
+    nom_service_propose = models.CharField(max_length=100)
+    desc_service = models.TextField(blank=True, default='')
+    code_analytique_propose = models.CharField(max_length=100, blank=True, default='')
+    statut = models.CharField(
+        max_length=32,
+        choices=StatutDemandeService.choices,
+        default=StatutDemandeService.SOUMISE,
+    )
+    demandeur_id = models.UUIDField(db_index=True)
+    demandeur_email = models.EmailField(blank=True, default='')
+    commentaire_admin = models.TextField(blank=True, default='')
+    signature_directeur_id = models.UUIDField(null=True, blank=True)
+    commentaire_directeur = models.TextField(blank=True, default='')
+    date_signature_directeur = models.DateTimeField(null=True, blank=True)
+    date_envoi_plateforme = models.DateTimeField(null=True, blank=True)
+    date_traitement_plateforme = models.DateTimeField(null=True, blank=True)
+    service_cree_id = models.IntegerField(null=True, blank=True)
+    motif_rejet = models.TextField(blank=True, default='')
+    date_creation = models.DateTimeField(auto_now_add=True)
+    date_maj = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Demande de service'
+        verbose_name_plural = 'Demandes de service'
+        ordering = ['-date_creation']
+
+    def __str__(self):
+        return f"{self.nom_service_propose} ({self.statut})"

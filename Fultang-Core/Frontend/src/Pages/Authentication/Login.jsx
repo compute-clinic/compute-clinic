@@ -22,18 +22,28 @@ export function LoginPage() {
     const { isLoading, setIsLoading, login, userData } = useAuthentication();
     const navigate = useNavigate();
     const { t } = useTranslation();
-    const data = {
-        email: username,
-        password: password
-    }
-
-
-
     const handleLogin = async (e) => {
         e.preventDefault();
+        setIsLoginErrorPresent(false);
+        setLoginError("");
+
+        const email = username.trim();
+        const pwd = password;
+
+        if (!email) {
+            setIsLoginErrorPresent(true);
+            setLoginError(t("auth.missingEmail"));
+            return;
+        }
+
+        if (!pwd.trim()) {
+            setIsLoginErrorPresent(true);
+            setLoginError(t("auth.missingPassword"));
+            return;
+        }
+
         setIsLoading(true);
-        const response = await login(data);
-        console.log(response);
+        const response = await login({ email, password: pwd });
 
         // Verifier si la connexion a reussi
         if (response && response.success) {
@@ -53,12 +63,15 @@ export function LoginPage() {
             // Redirection selon le role/poste
             navigateToRole(role);
         } else {
-            // Afficher l'erreur
             setIsLoginErrorPresent(true);
-            if (response && response.error) {
-                setLoginError(`${response.error}: ${response.detail}`);
+            if (response?.status === 401) {
+                setLoginError(t("auth.invalidPassword"));
+            } else if (response?.detail) {
+                setLoginError(response.detail);
+            } else if (response?.error) {
+                setLoginError(response.error);
             } else {
-                setLoginError("Une erreur inconnue s'est produite");
+                setLoginError(t("auth.errorOccurred"));
             }
         }
 
@@ -100,6 +113,9 @@ export function LoginPage() {
                 break;
             case 'directeur':
                 navigate(appRouterPaths.directorDashboard);
+                break;
+            case 'rh':
+                navigate(appRouterPaths.infrastructureRhHome);
                 break;
             case 'platform_admin':
                 navigate(appRouterPaths.platformAdminDashboardPage);
@@ -169,6 +185,7 @@ export function LoginPage() {
                                         <input type="text"
                                             name="username"
                                             autoComplete="username"
+                                            value={username}
                                             onChange={(e) => { setUsername(e.target.value) }}
                                             className="w-full rounded-lg h-12 ml-2 mr-2 bg-gray-300 border-none outline:none focus:border-none ring-0 focus:outline-none focus:ring-0 autofill:shadow-[inset_0_0_0px_1000px_rgb(209,213,219)]"
                                             placeholder={"Enter your username here"} />
@@ -183,6 +200,7 @@ export function LoginPage() {
                                             name="password"
                                             autoComplete="current-password"
                                             type={showPassword ? "text" : "password"}
+                                            value={password}
                                             onChange={(e) => { setPassword(e.target.value) }}
                                             className="w-full rounded-lg h-12 ml-2 mr-10 bg-gray-300 border-none outline:none ring-0 focus:outline-none focus:ring-0"
                                             placeholder="Enter your password here"

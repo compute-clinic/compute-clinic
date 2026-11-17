@@ -56,13 +56,13 @@ describe("AddNewPatientModal — formulaire simplifié réception", () => {
     });
   });
 
-  it("mode identité : exige le nom et la profession", async () => {
+  it("mode identité : exige le nom (profession optionnelle)", async () => {
     const user = userEvent.setup();
     render(<AddNewPatientModal {...defaultProps} />);
 
     await user.click(screen.getByRole("button", { name: /Enregistrer/i }));
     expect(await screen.findByText(/Le nom est obligatoire/i)).toBeInTheDocument();
-    expect(screen.getByText(/La profession est obligatoire/i)).toBeInTheDocument();
+    expect(screen.queryByText(/La profession est obligatoire/i)).not.toBeInTheDocument();
   });
 
   it("mode identité : profession Autre exige la précision", async () => {

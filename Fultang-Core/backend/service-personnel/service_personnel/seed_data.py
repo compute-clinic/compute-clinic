@@ -16,6 +16,7 @@ from django.contrib.auth.hashers import make_password
 from api.models import (
     Service, Medecin, MedecinGeneraliste, Infirmiere, Receptionniste,
     ComptableFinancier, ComptableMatiere, Laborantin, Pharmacien, Directeur, Admin,
+    ResponsableRH, DocumentPersonnel, TypeDocumentPersonnel,
 )
 
 PWD_DEFAULT = make_password('Fultang@123')
@@ -49,6 +50,16 @@ PERSONNEL = [
    {}, 'Administration', PWD_DEFAULT),
   ('marie.ateba@fultang.local', 'INF001', 'Ateba', 'Marie', 'infirmiere',
    {'grade': 'IDE'}, 'Maternité', PWD_DEFAULT),
+  ('fatou.ndongo@fultang.local', 'INF002', 'Ndongo', 'Fatou', 'infirmiere',
+   {'grade': 'IDE'}, 'Chirurgie', PWD_DEFAULT),
+  ('grace.owona@fultang.local', 'INF003', 'Owona', 'Grace', 'infirmiere',
+   {'grade': 'IDE'}, 'Consultation générale', PWD_DEFAULT),
+  ('aimee.fouda@fultang.local', 'INF004', 'Fouda', 'Aimée', 'infirmiere',
+   {'grade': 'IDE'}, 'Neurologie', PWD_DEFAULT),
+  ('ines.menga@fultang.local', 'INF005', 'Menga', 'Inès', 'infirmiere',
+   {'grade': 'IDE'}, 'Urgences', PWD_DEFAULT),
+  ('rh@fultang.local', 'RH001', 'Mvondo', 'Sandrine', 'rh',
+   {}, 'Administration', PWD_DEFAULT),
   ('luc.kamga@fultang.local', 'LAB001', 'Kamga', 'Luc', 'laborantin',
    {'specialite_labo': 'HEMATOLOGIE'}, 'Laboratoire', PWD_DEFAULT),
   ('sylvie.ekani@fultang.local', 'PHA001', 'Ekani', 'Sylvie', 'pharmacien',
@@ -70,9 +81,57 @@ PERSONNEL = [
 COMMON = {
     'date_naissance': date(1985, 6, 15),
     'adresse': 'Polyclinique Fultang, Yaoundé',
-    'contact': '+237600000000',
+    'contact': '690000000',
     'date_embauche': date(2020, 1, 1),
 }
+
+# Petit PDF valide pour le dossier RH de démonstration.
+_MINI_PDF = (
+    b"%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\n"
+    b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n"
+    b"0000000058 00000 n \n0000000115 00000 n \n"
+    b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF\n"
+)
+
+
+def seed_papiers():
+    """Attache CNI, contrat et CV de démonstration à chaque agent."""
+    from django.core.files.base import ContentFile
+    roles = (
+        Medecin, MedecinGeneraliste, Infirmiere, Receptionniste,
+        ComptableFinancier, ComptableMatiere, Laborantin, Pharmacien,
+        Directeur, Admin, ResponsableRH,
+    )
+    pieces = (
+        (TypeDocumentPersonnel.CNI, 'CNI'),
+        (TypeDocumentPersonnel.CONTRAT, 'Contrat de travail'),
+        (TypeDocumentPersonnel.CV, 'Curriculum vitae'),
+    )
+    n = 0
+    for model_cls in roles:
+        for agent in model_cls.objects.all():
+            for type_doc, libelle in pieces:
+                exists = DocumentPersonnel.objects.filter(
+                    personnel_id=agent.id_personnel,
+                    type_document=type_doc,
+                ).exists()
+                if exists:
+                    continue
+                doc = DocumentPersonnel(
+                    personnel_id=agent.id_personnel,
+                    tenant_id=getattr(agent, 'tenant_id', None),
+                    type_document=type_doc,
+                    libelle=f"{libelle} — {agent.nom} {agent.prenom}",
+                )
+                doc.fichier.save(
+                    f"{type_doc.lower()}_{agent.matricule}.pdf",
+                    ContentFile(_MINI_PDF),
+                    save=True,
+                )
+                n += 1
+    print(f"Papiers RH : {n} pièce(s) ajoutée(s).")
 
 
 def get_service_map():
@@ -112,6 +171,7 @@ def ensure_person_role(email, target_model, matricule, defaults):
     ROLE_MODELS = (
         ComptableFinancier, ComptableMatiere, Receptionniste, Infirmiere,
         Laborantin, Pharmacien, Medecin, MedecinGeneraliste, Directeur, Admin,
+        ResponsableRH,
     )
     for model_cls in ROLE_MODELS:
         if model_cls is target_model:
@@ -159,6 +219,8 @@ def seed_personnel(services):
             _, is_new = upsert_person(Directeur, email, matricule, base)
         elif role == 'admin':
             _, is_new = upsert_person(Admin, email, matricule, base)
+        elif role == 'rh':
+            _, is_new = upsert_person(ResponsableRH, email, matricule, base)
         else:
             continue
         if is_new:
@@ -166,6 +228,10 @@ def seed_personnel(services):
         print(f"  {'+' if is_new else '~'} {role}: {email}")
 
     print(f"\nPersonnel : {created} créé(s), {len(PERSONNEL)} profils au total.")
+    try:
+        seed_papiers()
+    except Exception as exc:
+        print(f"  ! papiers RH non générés : {exc}")
 
 
 if __name__ == '__main__':

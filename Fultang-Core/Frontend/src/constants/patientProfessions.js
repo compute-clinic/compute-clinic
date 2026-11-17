@@ -39,14 +39,10 @@ export function resolveProfessionValue(formData) {
     return sel?.trim() || formData.profession?.trim() || '';
 }
 
-/** Validation frontend — profession obligatoire (hors mode code identifiant). */
+/** Validation frontend — profession optionnelle ; « Autre » exige une précision si choisi. */
 export function validateProfessionFields(formData) {
     const errors = {};
     const sel = formData.profession_select;
-    if (!sel) {
-        errors.profession_select = 'La profession est obligatoire.';
-        return errors;
-    }
     if (sel === PROFESSION_AUTRE && !formData.profession_autre?.trim()) {
         errors.profession_autre = 'Précisez la profession.';
     }

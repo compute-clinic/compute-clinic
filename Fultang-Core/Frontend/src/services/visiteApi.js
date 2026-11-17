@@ -15,7 +15,9 @@ export const getVisitesPatient = async (patientId, filters = {}) => {
 /** Visite EN_COURS non encore payée ou paiement expiré. */
 export const getVisiteEnCoursNonPayee = async (patientId) => {
     const visites = await getVisitesPatient(patientId, { statut: 'EN_COURS' });
-    return visites.find((v) => !v.paiement_valide || v.paiement_actif === false) || null;
+    return visites.find((v) =>
+        v.paiement_requis !== false && (!v.paiement_valide || v.paiement_actif === false)
+    ) || null;
 };
 
 export const confirmVisitePaiement = async (visiteId) => {
@@ -47,15 +49,21 @@ export const convertRdvToVisite = async ({
     motif,
     medecinOrienteId = null,
     modeUrgence = false,
+    paiementRequis = true,
+    serviceId = null,
+    serviceNom = '',
 }) => {
     const payload = {
         patient: patientId,
         motif_visite: motif,
         mode_urgence: modeUrgence,
+        paiement_requis: paiementRequis,
     };
     if (medecinOrienteId) {
         payload.medecin_oriente_id = medecinOrienteId;
     }
+    if (serviceId) payload.service_id = serviceId;
+    if (serviceNom) payload.service_nom = serviceNom;
     const visiteResponse = await axiosInstance.post('/visites/', payload);
     if (rdvId) {
         try {

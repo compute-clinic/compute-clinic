@@ -51,3 +51,4 @@ export function getCurrentTenantIdentifier() {
 }
 
 export const PERSONNEL_MEDECINS_URL = () => `${getGatewayBaseUrl()}/personnel/medecins/`;
+export const PERSONNEL_MEDECINS_GENERALISTES_URL = () => `${getGatewayBaseUrl()}/personnel/medecins-generalistes/`;

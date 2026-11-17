@@ -286,7 +286,7 @@ export function EditPatientInfosModal({
                                                 onSelectChange={handleChange}
                                                 onAutreChange={handleChange}
                                                 errors={errors}
-                                                required
+                                                required={false}
                                                 disabled={loadingDossier || isSubmitting}
                                                 inputClass={inputClass()}
                                                 idPrefix="edit_profession"

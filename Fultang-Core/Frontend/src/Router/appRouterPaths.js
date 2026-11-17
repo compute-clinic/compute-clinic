@@ -5,6 +5,10 @@ export const AppRoutesPaths = {
     adminHomePage: "/admin/home",
     adminServicesPage: "/admin/services",
     adminPersonnelPage: "/admin/personnel",
+    adminServiceRequestsPage: "/admin/demandes-service",
+    infrastructureRhHome: "/infrastructure/rh",
+    infrastructureRhPersonnel: "/infrastructure/rh/personnel",
+    infrastructureRhServices: "/infrastructure/rh/services",
     adminChambresPage: "/admin/chambres",
     welcomePage: "/",
     loginPage: "/login",
@@ -32,6 +36,7 @@ export const AppRoutesPaths = {
     specialistPatientDossier: "/specialist/patients/medical-folder/:id",
     nursePage: "/nurse/waiting-room",
     nurseWaitingRoomPage: "/nurse/waiting-room",
+    nurseMyConsultationsPage: "/nurse/my-consultations",
     nursePatientManagementPage: "/nurse/patient-management",
     nurseAppointmentsPage: "/nurse/appointments",
     nurseExamsPage: "/nurse/exams",
@@ -87,6 +92,9 @@ export const AppRoutesPaths = {
 
     // Director routes
     directorDashboard: "/director/dashboard",
+    directorApprovals: "/director/approvals",
+    directorServiceRequests: "/director/demandes-service",
+    platformAdminServiceDemandes: "/platform-admin/demandes-service",
     directorReports: "/director/reports",
     directorAudit: "/director/audit",
 

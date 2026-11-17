@@ -3,9 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
 import { BedDouble, Plus, Search, Edit3, Trash2, Check, X } from 'lucide-react';
 import { Table, message, Modal as AntModal, Tag, Input, Progress, Tabs } from 'antd';
-import { CustomDashboard } from '../../GlobalComponents/CustomDashboard.jsx';
-import { AdminNavBar } from './AdminNavBar.jsx';
-import { newAdminNavLink } from './newAdminNavLink.js';
+import { EtablissementLayout } from './EtablissementLayout.jsx';
 import { getAllChambres, createChambre, updateChambre, deleteChambre, getTypesSalle } from '../../services/chambresApi';
 import { getAllServices } from '../../services/servicesApi';
 import { getAllBatiments, createBatiment, getAllEtages, createEtage, getTypesBatiment } from '../../services/infrastructureApi.js';
@@ -364,8 +362,7 @@ export function AdminChambresPage() {
     ];
 
     return (
-        <CustomDashboard linkList={newAdminNavLink} requiredRole={"Admin"}>
-            <AdminNavBar />
+        <EtablissementLayout>
             <div className="p-6 bg-gray-50 min-h-screen">
                 {/* Header */}
                 <motion.div
@@ -602,7 +599,7 @@ export function AdminChambresPage() {
                     </div>
                 </div>
             </AntModal>
-        </CustomDashboard>
+        </EtablissementLayout>
     );
 }
 

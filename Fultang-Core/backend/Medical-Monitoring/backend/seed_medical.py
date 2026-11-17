@@ -17,6 +17,9 @@ import random
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
 django.setup()
 
+from core.tenant_routing.context import set_tenant_context
+set_tenant_context(None)
+
 from django.db import transaction
 from patient.models.satellite import Adresse, Nationalite, Contact
 from patient.models.emergency import PersonneAPrevenir, LienParente
@@ -169,7 +172,6 @@ def seed():
         nb_visites = random.randint(1, 4)
         for _ in range(nb_visites):
             statut = random.choice([
-                StatutVisite.EN_COURS,
                 StatutVisite.TERMINE,
                 StatutVisite.TERMINE,
                 StatutVisite.ANNULE,
@@ -178,6 +180,8 @@ def seed():
                 patient=patient,
                 motif_visite=random.choice(MOTIFS),
                 statut=statut,
+                paiement_requis=False,
+                paiement_valide=statut == StatutVisite.TERMINE,
             )
 
     total_visites = Visite.objects.count()

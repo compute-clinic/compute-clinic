@@ -1,6 +1,6 @@
 import { FaHome } from "react-icons/fa";
 import { AppRoutesPaths as appRoutes } from "../../Router/appRouterPaths.js";
-import { Building2, Users, Stethoscope } from "lucide-react";
+import { Building2, Stethoscope, FilePlus2 } from "lucide-react";
 
 /**
  * Configuration de la navigation pour le dashboard administrateur.
@@ -13,14 +13,14 @@ export const newAdminNavLink = [
         icon: FaHome,
     },
     {
-        name: "Services",
-        icon: Building2,
-        link: appRoutes.adminServicesPage,
+        name: "Demandes de service",
+        icon: FilePlus2,
+        link: appRoutes.adminServiceRequestsPage,
     },
     {
-        name: "Personnel",
-        icon: Users,
-        link: appRoutes.adminPersonnelPage,
+        name: "Services (consultation)",
+        icon: Building2,
+        link: appRoutes.adminServicesPage,
     },
     {
         name: "Infrastructures",

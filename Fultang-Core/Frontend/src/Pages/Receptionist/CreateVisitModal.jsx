@@ -1,10 +1,10 @@
-import { XIcon, Stethoscope, Clock, CheckCircle, AlertTriangle } from "lucide-react";
+import { XIcon, Stethoscope, Clock, AlertTriangle, Wallet, ArrowRightCircle, CheckCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Alert, Select } from "antd";
 import axios from "axios";
 import axiosInstance from "../../Utils/axiosInstance.js";
-import { PERSONNEL_MEDECINS_URL } from "../../Utils/gatewayUrls.js";
+import { PERSONNEL_MEDECINS_URL, PERSONNEL_MEDECINS_GENERALISTES_URL } from "../../Utils/gatewayUrls.js";
 import { getToken } from "../../Utils/authToken.js";
 
 export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, setCanOpenSuccessModal }) {
@@ -38,10 +38,16 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
             try {
                 const token = getToken();
                 const headers = token ? { Authorization: `Bearer ${token}` } : {};
-                const response = await axios.get(PERSONNEL_MEDECINS_URL(), { headers });
-                const mapped = Array.isArray(response.data)
-                    ? response.data
-                    : (response.data?.results || []);
+                const [r1, r2] = await Promise.allSettled([
+                    axios.get(PERSONNEL_MEDECINS_URL(), { headers }),
+                    axios.get(PERSONNEL_MEDECINS_GENERALISTES_URL(), { headers }),
+                ]);
+                const listOf = (res) => {
+                    if (res.status !== 'fulfilled') return [];
+                    const d = res.value.data;
+                    return Array.isArray(d) ? d : (d?.results || []);
+                };
+                const mapped = [...listOf(r1), ...listOf(r2)];
                 setDoctors(mapped);
                 if (mapped.length === 0) {
                     setDoctorsError(
@@ -60,10 +66,17 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
         fetchDoctors();
     }, [isOpen]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const selectedDoctor = doctors.find(
+        (d) => String(d.id_personnel || d.id) === String(formData.id_medecin)
+    );
+
+    const handleSubmit = async (envoyerCaisse) => {
         if (!formData.motif?.trim()) {
             setError("Le motif de la visite est obligatoire.");
+            return;
+        }
+        if (!formData.id_medecin) {
+            setError("Sélectionnez un médecin pour orienter le patient vers le bon service (infirmier puis médecin).");
             return;
         }
 
@@ -75,24 +88,29 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
                 patient: patient.id,
                 motif_visite: formData.motif.trim(),
                 mode_urgence: formData.mode_urgence,
+                paiement_requis: envoyerCaisse,
             };
             if (formData.id_medecin) {
                 payload.medecin_oriente_id = formData.id_medecin;
             }
+            const serviceId = selectedDoctor?.service || selectedDoctor?.service_id;
+            const serviceNom = selectedDoctor?.service_nom;
+            if (serviceId) payload.service_id = serviceId;
+            if (serviceNom) payload.service_nom = serviceNom;
+
             const response = await axiosInstance.post("/visites/", payload);
 
             if (response.status === 201 || response.status === 200) {
-                const medLabel = formData.id_medecin
-                    ? doctors.find((d) => String(d.id_personnel || d.id) === String(formData.id_medecin))
-                    : null;
-                const medecinNote = medLabel
-                    ? ` — orienté Dr. ${medLabel.nom}`
+                const medecinNote = selectedDoctor
+                    ? ` — orienté Dr. ${selectedDoctor.nom}`
                     : "";
                 const baseMsg = `Visite créée avec succès pour ${patient.nom}${medecinNote} !`;
                 setSuccessMessage(
                     formData.mode_urgence
                         ? `${baseMsg}\n\nMode urgences : orientez le patient vers l'infirmier (paiement différé).`
-                        : `${baseMsg}\n\nProchaine étape : le patient doit se présenter à la caisse pour régler la consultation avant le passage infirmier et médical.`
+                        : envoyerCaisse
+                            ? `${baseMsg}\n\nEnvoi caisse : le patient apparaît d'abord chez l'infirmier du service pour les paramètres ; le médecin le verra après le triage et le règlement.`
+                            : `${baseMsg}\n\nLe patient apparaît d'abord chez l'infirmier du service ; après prise des paramètres, il sera visible chez le médecin orienté.`
                 );
                 setCanOpenSuccessModal(true);
                 onClose();
@@ -112,7 +130,7 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
 
     const doctorOptions = doctors.map((d) => ({
         value: String(d.id_personnel || d.id),
-        label: `Dr. ${d.nom || ''} ${d.prenom || ''}`.trim(),
+        label: `Dr. ${d.nom || ''} ${d.prenom || ''}${d.service_nom ? ` — ${d.service_nom}` : ''}`.trim(),
     }));
 
     return (
@@ -130,17 +148,13 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-8 space-y-6">
+                <div className="p-8 space-y-6">
                     {error && <Alert message={error} type="error" showIcon className="rounded-xl" />}
                     <Alert
                         type="info"
                         showIcon
                         className="rounded-xl"
-                        message={
-                            formData.mode_urgence
-                                ? "Mode urgences : dossier provisoire — le patient peut être pris en charge avant paiement (CORR-A3-001)."
-                                : "Après création de la visite, le patient doit régler la consultation à la caisse (RG-CF-001) avant d'être reçu par le médecin."
-                        }
+                        message="Parcours : réception → infirmier (paramètres) → médecin du service. Le paiement à la caisse bloque seulement l'accès médecin, pas le triage infirmier."
                     />
                     {doctorsError && (
                         <Alert
@@ -169,8 +183,8 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
                     <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                             <Clock className="w-4 h-4 text-blue-500" />
-                            Médecin disponible
-                            <span className="text-gray-400 font-normal text-xs">(optionnel)</span>
+                            Médecin / service
+                            <span className="text-gray-400 font-normal text-xs">(oriente le dossier, pas de fuite entre services)</span>
                         </label>
                         <Select
                             className="w-full"
@@ -186,9 +200,6 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
                             size="large"
                             notFoundContent="Aucun médecin — confirmez quand même la visite"
                         />
-                        <p className="text-xs text-gray-400 mt-1">
-                            La sélection oriente le patient ; la visite est enregistrée même sans médecin.
-                        </p>
                     </div>
 
                     <label className="flex items-start gap-3 p-4 rounded-xl border border-orange-200 bg-orange-50 cursor-pointer">
@@ -200,28 +211,39 @@ export function CreateVisitModal({ isOpen, onClose, patient, setSuccessMessage, 
                         />
                         <span>
                             <span className="font-semibold text-orange-800 block">Admission urgences / dossier provisoire</span>
-                            <span className="text-xs text-orange-700">Bypass paiement initial — prise en charge urgente (CORR-A3-001)</span>
+                            <span className="text-xs text-orange-700">Prise en charge immédiate même si envoyé à la caisse</span>
                         </span>
                     </label>
 
-                    <div className="flex gap-4 pt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                         <button
-                            type="submit"
+                            type="button"
                             disabled={isSubmitting}
-                            className="flex-1 bg-blue-600 text-white py-3.5 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                            onClick={() => handleSubmit(true)}
+                            className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white py-3.5 rounded-xl font-bold shadow-lg transition-all disabled:opacity-50"
                         >
-                            <CheckCircle className="w-5 h-5" />
-                            {isSubmitting ? "Création…" : "Confirmer la visite"}
+                            <Wallet className="w-5 h-5" />
+                            {isSubmitting ? "Création…" : "Envoyer à la caisse"}
                         </button>
                         <button
                             type="button"
-                            onClick={onClose}
-                            className="px-6 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-all"
+                            disabled={isSubmitting}
+                            onClick={() => handleSubmit(false)}
+                            className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-xl font-bold shadow-lg transition-all disabled:opacity-50"
                         >
-                            Annuler
+                            <ArrowRightCircle className="w-5 h-5" />
+                            {isSubmitting ? "Création…" : "Passer (sans caisse)"}
                         </button>
                     </div>
-                </form>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="w-full py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-all flex items-center justify-center gap-2"
+                    >
+                        <CheckCircle className="w-4 h-4 opacity-0" />
+                        Annuler
+                    </button>
+                </div>
             </div>
         </div>
     );

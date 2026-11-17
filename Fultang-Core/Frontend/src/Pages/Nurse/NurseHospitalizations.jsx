@@ -17,6 +17,10 @@ export const NurseHospitalizations = () => {
     const navigate = useNavigate();
 
     const [assignTarget, setAssignTarget] = useState(null);
+    const [pasHospiTarget, setPasHospiTarget] = useState(null);
+    const [pasHospiMotifType, setPasHospiMotifType] = useState('refus_patient');
+    const [pasHospiDetail, setPasHospiDetail] = useState('');
+    const [pasHospiSaving, setPasHospiSaving] = useState(false);
 
     // Care Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -43,6 +47,53 @@ export const NurseHospitalizations = () => {
             console.error(err);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleConfirmerHospitalise = async (hosp) => {
+        if (!window.confirm(`${hosp.patient.nom} ${hosp.patient.prenom} a-t-il effectivement été hospitalisé ?`)) return;
+        try {
+            await axiosInstance.post(`/hospitalisations/${hosp.id}/confirmer/`);
+            await loadHospitalizations();
+            setAssignTarget({ ...hosp, statut: 'EN_COURS', needsRoomAssignment: !hosp.room_id });
+        } catch (err) {
+            alert(err.response?.data?.error || "Impossible de confirmer l'hospitalisation.");
+        }
+    };
+
+    const MOTIFS_PAS_HOSPI = {
+        refus_patient: 'Refus du patient',
+        patient_parti: 'Patient parti',
+        autre: 'Autre',
+    };
+
+    const openPasHospi = (hosp) => {
+        setPasHospiTarget(hosp);
+        setPasHospiMotifType('refus_patient');
+        setPasHospiDetail('');
+    };
+
+    const handlePasDHospi = async (e) => {
+        e.preventDefault();
+        if (!pasHospiTarget) return;
+        const libelle = MOTIFS_PAS_HOSPI[pasHospiMotifType] || pasHospiMotifType;
+        const detail = pasHospiDetail.trim();
+        if (pasHospiMotifType === 'autre' && !detail) {
+            alert('Précisez le motif.');
+            return;
+        }
+        const motif = detail ? `${libelle} — ${detail}` : libelle;
+        setPasHospiSaving(true);
+        try {
+            await axiosInstance.post(`/hospitalisations/${pasHospiTarget.id}/pas-d-hospi/`, {
+                motif_refus: motif,
+            });
+            setPasHospiTarget(null);
+            await loadHospitalizations();
+        } catch (err) {
+            alert(err.response?.data?.error || "Impossible d'enregistrer. Réessayez.");
+        } finally {
+            setPasHospiSaving(false);
         }
     };
 
@@ -120,7 +171,7 @@ export const NurseHospitalizations = () => {
                                 Gestion des Hospitalisations
                             </h2>
                             <p className="text-sm text-gray-500 mt-1">
-                                L&apos;infirmier(ère) affecte le patient à une salle et un lit, puis assure le suivi des soins
+                                Validez les demandes du médecin (hospitalisé ou non), puis affectez salle et lit.
                             </p>
                         </div>
                         <div className="relative w-full md:w-64">
@@ -157,9 +208,11 @@ export const NurseHospitalizations = () => {
                                             }`}>
                                                 {hosp.statut === 'EN_SORTIE'
                                                     ? 'En cours de sortie'
-                                                    : hosp.needsRoomAssignment
-                                                        ? 'En attente d\'affectation'
-                                                        : 'Hospitalisé'}
+                                                    : hosp.statut === 'EN_ATTENTE_LIT'
+                                                        ? 'Demande médecin — à valider'
+                                                        : hosp.needsRoomAssignment
+                                                            ? 'En attente d\'affectation'
+                                                            : 'Hospitalisé'}
                                             </span>
                                         </div>
 
@@ -198,7 +251,27 @@ export const NurseHospitalizations = () => {
                                         )}
 
                                         <div className="flex gap-3 flex-wrap">
-                                            {hosp.needsRoomAssignment && (
+                                            {hosp.statut === 'EN_ATTENTE_LIT' && (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleConfirmerHospitalise(hosp)}
+                                                        className="flex-1 flex items-center justify-center px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm shadow-sm hover:bg-emerald-700"
+                                                    >
+                                                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                                                        Hospitalisé
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openPasHospi(hosp)}
+                                                        className="flex-1 flex items-center justify-center px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-50"
+                                                    >
+                                                        <AlertCircle className="w-4 h-4 mr-2" />
+                                                        Pas d&apos;hospi
+                                                    </button>
+                                                </>
+                                            )}
+                                            {hosp.needsRoomAssignment && hosp.statut !== 'EN_ATTENTE_LIT' && (
                                                 <button
                                                     type="button"
                                                     onClick={() => setAssignTarget(hosp)}
@@ -255,6 +328,75 @@ export const NurseHospitalizations = () => {
                             ))
                         )}
                     </div>
+
+                    {pasHospiTarget && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+                                <div className="bg-slate-700 p-5 text-white flex justify-between items-center">
+                                    <div>
+                                        <h3 className="text-lg font-bold">Pas d&apos;hospitalisation</h3>
+                                        <p className="text-sm opacity-90">
+                                            {pasHospiTarget.patient.nom} {pasHospiTarget.patient.prenom}
+                                        </p>
+                                    </div>
+                                    <button type="button" onClick={() => setPasHospiTarget(null)} className="p-2 hover:bg-white/20 rounded-full">
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+                                <form onSubmit={handlePasDHospi} className="p-5 space-y-4">
+                                    <p className="text-sm text-gray-600">
+                                        Le motif sera transmis au médecin qui a demandé l&apos;hospitalisation.
+                                    </p>
+                                    <div className="space-y-2">
+                                        {[
+                                            ['refus_patient', 'Refus du patient'],
+                                            ['patient_parti', 'Patient parti'],
+                                            ['autre', 'Autre motif'],
+                                        ].map(([value, label]) => (
+                                            <label key={value} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer">
+                                                <input
+                                                    type="radio"
+                                                    name="motif_pas_hospi"
+                                                    checked={pasHospiMotifType === value}
+                                                    onChange={() => setPasHospiMotifType(value)}
+                                                />
+                                                <span className="text-sm font-medium text-gray-800">{label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+                                            Précision {pasHospiMotifType === 'autre' ? '(obligatoire)' : '(optionnelle)'}
+                                        </label>
+                                        <textarea
+                                            className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-primary-start"
+                                            rows="3"
+                                            value={pasHospiDetail}
+                                            onChange={(e) => setPasHospiDetail(e.target.value)}
+                                            placeholder="Ex. : le patient a quitté l'établissement avant l'admission…"
+                                            required={pasHospiMotifType === 'autre'}
+                                        />
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPasHospiTarget(null)}
+                                            className="flex-1 py-2 rounded-xl border font-bold text-gray-600"
+                                        >
+                                            Annuler
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={pasHospiSaving}
+                                            className="flex-1 py-2 rounded-xl bg-slate-700 text-white font-bold disabled:opacity-50"
+                                        >
+                                            {pasHospiSaving ? 'Envoi…' : 'Envoyer au médecin'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
 
                     <NurseAssignRoomModal
                         isOpen={Boolean(assignTarget)}

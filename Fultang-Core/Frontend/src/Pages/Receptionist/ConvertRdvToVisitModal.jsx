@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { Alert } from 'antd';
 import axiosInstance from '../../Utils/axiosInstance.js';
+import { getGatewayBaseUrl } from '../../Utils/gatewayUrls.js';
 import { convertRdvToVisite } from '../../services/visiteApi.js';
 
 export function ConvertRdvToVisitModal({
@@ -46,8 +47,7 @@ export function ConvertRdvToVisitModal({
         loadPatient();
     }, [isOpen, rdv, patientLabel]);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const handleSubmit = async (envoyerCaisse) => {
         if (!rdv?.patient) return;
         if (!formData.motif?.trim()) {
             setError('Le motif de la visite est obligatoire.');
@@ -63,12 +63,37 @@ export function ConvertRdvToVisitModal({
                 ? rdv.personnel_concerne
                 : null;
 
+            let serviceId = null;
+            let serviceNom = '';
+            if (medecinId) {
+                try {
+                    const gw = getGatewayBaseUrl();
+                    const docRes = await axiosInstance.get(`${gw}/personnel/medecins/${medecinId}/`);
+                    const doc = docRes.data;
+                    serviceId = doc?.service ?? doc?.service_id ?? null;
+                    serviceNom = doc?.service_nom || '';
+                } catch {
+                    try {
+                        const gw = getGatewayBaseUrl();
+                        const docRes = await axiosInstance.get(`${gw}/personnel/medecins-generalistes/${medecinId}/`);
+                        const doc = docRes.data;
+                        serviceId = doc?.service ?? doc?.service_id ?? null;
+                        serviceNom = doc?.service_nom || '';
+                    } catch {
+                        /* visite sans service explicite */
+                    }
+                }
+            }
+
             await convertRdvToVisite({
                 patientId: rdv.patient,
                 rdvId: rdv.id,
                 motif: formData.motif.trim(),
                 medecinOrienteId: medecinId,
                 modeUrgence: formData.mode_urgence,
+                paiementRequis: envoyerCaisse,
+                serviceId,
+                serviceNom,
             });
 
             const name = patient
@@ -78,7 +103,9 @@ export function ConvertRdvToVisitModal({
             setSuccessMessage(
                 formData.mode_urgence
                     ? `${baseMsg}\n\nMode urgences : orientez le patient vers l'infirmier (paiement différé).`
-                    : `${baseMsg}\n\nProchaine étape : le patient doit se présenter à la caisse pour régler la consultation.`
+                    : envoyerCaisse
+                        ? `${baseMsg}\n\nCaisse : triage infirmier d'abord, puis médecin après paramètres et règlement.`
+                        : `${baseMsg}\n\nLe patient apparaît chez l'infirmier du service, puis chez le médecin après les paramètres.`
             );
             setCanOpenSuccessModal(true);
             onConverted?.();
@@ -113,17 +140,13 @@ export function ConvertRdvToVisitModal({
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-8 space-y-6">
+                <div className="p-8 space-y-6">
                     {error && <Alert message={error} type="error" showIcon className="rounded-xl" />}
                     <Alert
                         type="info"
                         showIcon
                         className="rounded-xl"
-                        message={
-                            formData.mode_urgence
-                                ? 'Mode urgences : prise en charge possible avant paiement.'
-                                : 'Après ouverture de la visite, orientez le patient vers la caisse avant l\'infirmier et le médecin.'
-                        }
+                        message="Parcours : infirmier (paramètres) puis médecin. La caisse ne bloque que l'étape médecin."
                     />
 
                     <div>
@@ -152,24 +175,33 @@ export function ConvertRdvToVisitModal({
                         </span>
                     </label>
 
-                    <div className="flex gap-4 pt-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                         <button
-                            type="submit"
+                            type="button"
                             disabled={isSubmitting}
-                            className="flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-bold shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                            onClick={() => handleSubmit(true)}
+                            className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white py-3.5 rounded-xl font-bold disabled:opacity-50"
                         >
-                            <CheckCircle className="w-5 h-5" />
-                            {isSubmitting ? 'Conversion…' : 'Ouvrir la visite'}
+                            {isSubmitting ? 'Conversion…' : 'Envoyer à la caisse'}
                         </button>
                         <button
                             type="button"
-                            onClick={onClose}
-                            className="px-6 py-3.5 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-all"
+                            disabled={isSubmitting}
+                            onClick={() => handleSubmit(false)}
+                            className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-xl font-bold disabled:opacity-50"
                         >
-                            Annuler
+                            <CheckCircle className="w-5 h-5" />
+                            {isSubmitting ? 'Conversion…' : 'Passer'}
                         </button>
                     </div>
-                </form>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="w-full py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-xl"
+                    >
+                        Annuler
+                    </button>
+                </div>
             </div>
         </div>
     );

@@ -153,6 +153,49 @@ export const changePassword = async (data) => {
  * @param {number} id - ID du personnel
  * @returns {Promise} Nombre d'objets lies par type
  */
+export const TYPES_PAPIERS_RH = [
+    { value: 'CNI', label: "Pièce d'identité" },
+    { value: 'CV', label: 'Curriculum vitae' },
+    { value: 'DIPLOME', label: 'Diplôme' },
+    { value: 'CONTRAT', label: 'Contrat de travail' },
+    { value: 'ATTESTATION', label: 'Attestation' },
+    { value: 'PHOTO', label: "Photo d'identité" },
+    { value: 'CERTIFICAT', label: 'Certificat médical' },
+    { value: 'AUTRE', label: 'Autre' },
+];
+
+export const getPersonnelPapiers = async (personnelId) => {
+    const response = await axiosInstance.get(`${BASE_URL}/${personnelId}/papiers/`);
+    return response.data;
+};
+
+export const uploadPersonnelPapier = async (personnelId, { fichier, type_document, libelle }) => {
+    const form = new FormData();
+    form.append('fichier', fichier);
+    form.append('type_document', type_document || 'AUTRE');
+    if (libelle) form.append('libelle', libelle);
+    const response = await axiosInstance.post(`${BASE_URL}/${personnelId}/papiers/`, form);
+    return response.data;
+};
+
+export const downloadPersonnelPapier = async (personnelId, docId, nomFichier) => {
+    const response = await axiosInstance.get(`${BASE_URL}/${personnelId}/papiers/${docId}/`, {
+        responseType: 'blob',
+    });
+    const url = window.URL.createObjectURL(response.data);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nomFichier || 'document';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+};
+
+export const deletePersonnelPapier = async (personnelId, docId) => {
+    await axiosInstance.delete(`${BASE_URL}/${personnelId}/papiers/${docId}/`);
+};
+
 export const getPersonnelDependencies = async (id) => {
     try {
         const response = await axiosInstance.get(`${BASE_URL}/${id}/dependencies/`);

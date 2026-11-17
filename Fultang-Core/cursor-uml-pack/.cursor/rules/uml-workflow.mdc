@@ -1,0 +1,29 @@
+---
+description: End-to-end workflow for turning requirements into coherent UML models.
+alwaysApply: false
+---
+
+# UML Analysis Workflow
+
+For a new system, follow this order unless the user explicitly requests another scope:
+
+1. Extract functional requirements and important business rules.
+2. Identify system boundary and external actors.
+3. Build the use-case view.
+4. Write the main scenarios and alternative/error scenarios.
+5. Identify domain concepts and candidate classes.
+6. Define responsibilities and relationships.
+7. Build sequence diagrams for important scenarios.
+8. Refine the class diagram using evidence from the scenarios.
+9. Model workflows with activity diagrams where process logic is important.
+10. Model lifecycle behavior with state diagrams where entities have meaningful states.
+11. Model architecture with component/deployment diagrams when needed.
+12. Validate all diagrams together.
+
+Never jump directly from a short requirement paragraph to a large class diagram without first identifying the business concepts and responsibilities.
+
+When improving an existing project:
+- inspect the existing requirements and current design first;
+- distinguish existing design from proposed improvements;
+- preserve valid existing concepts unless there is a documented reason to change them;
+- identify exactly which problem each proposed modeling change solves.

@@ -368,7 +368,8 @@ def _collect_patient_prestations(patient_id: str, snapshot: dict) -> list[dict]:
         date_tri = visite.get('date_heure') or ''
         paiement_ok = bool(visite.get('paiement_valide'))
         urgence = bool(visite.get('mode_urgence'))
-        if paiement_ok or urgence:
+        paiement_requis = visite.get('paiement_requis', True)
+        if paiement_requis is False or paiement_ok or urgence:
             montant_visite = 0
         else:
             montant_visite = _tarif_consultation()

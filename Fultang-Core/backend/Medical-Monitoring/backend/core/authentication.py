@@ -33,11 +33,13 @@ class GatewayUser:
     is_authenticated = True
     is_active = True
 
-    def __init__(self, user_id: str, roles: list, tenant_id: str = None):
+    def __init__(self, user_id: str, roles: list, tenant_id: str = None, service_id=None, service_nom=None):
         self.id = user_id
         self.pk = user_id  # Alias attendu par certains composants DRF
         self.roles = roles
         self.tenant_id = tenant_id
+        self.service_id = service_id
+        self.service_nom = service_nom
 
     def __str__(self):
         return f"GatewayUser(id={self.id}, roles={self.roles}, tenant_id={self.tenant_id})"
@@ -67,13 +69,21 @@ class GatewayHeaderAuthentication(BaseAuthentication):
         user_id = request.META.get("HTTP_X_USER_ID")
         user_roles_raw = request.META.get("HTTP_X_USER_ROLES", "")
         tenant_id = request.META.get("HTTP_X_TENANT_ID") or None
+        service_id = request.META.get("HTTP_X_USER_SERVICE_ID") or None
+        service_nom = request.META.get("HTTP_X_USER_SERVICE_NOM") or None
 
         if not user_id:
             # Pas de header → on laisse DRF gérer (renverra 401 si IsAuthenticated)
             return None
 
         roles = [r.strip() for r in user_roles_raw.split(",") if r.strip()]
-        user = GatewayUser(user_id=user_id, roles=roles, tenant_id=tenant_id)
+        user = GatewayUser(
+            user_id=user_id,
+            roles=roles,
+            tenant_id=tenant_id,
+            service_id=service_id,
+            service_nom=service_nom,
+        )
 
         # Établit le Tenant Context pour le Database Router. Le token
         # n'a pas besoin d'être conservé ici : le nettoyage en fin de

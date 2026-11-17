@@ -14,6 +14,7 @@ const POSTE_LABELS = {
     receptionniste: "Réceptionniste",
     laborantin: "Laborantin",
     admin: "Administrateur",
+    rh: "Responsable RH",
 };
 
 export function getPersonnelUuid(person) {

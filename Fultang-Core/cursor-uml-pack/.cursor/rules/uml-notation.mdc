@@ -1,0 +1,33 @@
+---
+description: UML notation and relationship semantics. Use when selecting UML elements or reviewing diagram correctness.
+alwaysApply: false
+---
+
+# UML Notation Guardrails
+
+Use standard UML semantics.
+
+## Relationships
+- Association: structural relationship between classifiers; use when objects are meaningfully connected.
+- Dependency: one element uses or depends on another without implying structural ownership.
+- Generalization: an "is-a" relationship with substitutability.
+- Realization: a classifier fulfills a contract such as an interface.
+- Aggregation: use only when shared/whole-part semantics are genuinely meaningful; do not use it as a generic "has-a" arrow.
+- Composition: use only when the part has strong lifecycle ownership by the whole and the intended lifecycle semantics are true.
+
+## Multiplicity
+Use explicit multiplicities when they matter to the business model. Do not invent `1..*` or `0..1` without evidence.
+
+## Names
+- Use domain language rather than UI labels when modeling the domain.
+- Use nouns for classes/entities and meaningful verb phrases for operations/use cases.
+- Avoid vague classes such as `Gestion`, `Systeme`, `Manager`, or `Data` unless their responsibility is justified.
+
+## Common mistakes to reject
+- Every class connected to every other class.
+- Composition used for every containment relation.
+- Inheritance used only to reuse fields.
+- Database tables copied blindly into a conceptual class diagram.
+- Buttons/screens treated as domain classes.
+- Use cases named after implementation methods.
+- Sequence diagrams that contain no meaningful responsibility or decision logic.

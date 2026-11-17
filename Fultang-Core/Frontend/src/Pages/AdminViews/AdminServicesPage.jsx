@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { Building2, Plus, Search, Edit3, Trash2, BarChart3, Users } from 'lucide-react';
-import { Table, message, Modal as AntModal, Tag, Input } from 'antd';
-import { CustomDashboard } from '../../GlobalComponents/CustomDashboard.jsx';
-import { AdminNavBar } from './AdminNavBar.jsx';
-import { newAdminNavLink } from './newAdminNavLink.js';
-import { getAllServices, deleteService } from '../../services/servicesApi';
-import { AddServiceModal } from './Services/AddServiceModal.jsx';
-import { EditServiceModal } from './Services/EditServiceModal.jsx';
+import { Building2, Search, BarChart3, Users } from 'lucide-react';
+import { Table, message, Tag, Input } from 'antd';
+import { Link } from 'react-router-dom';
+import { AppRoutesPaths } from '../../Router/appRouterPaths.js';
+import { EtablissementLayout } from './EtablissementLayout.jsx';
+import { useAuthentication } from '../../Utils/Provider.jsx';
+import { getAllServices } from '../../services/servicesApi';
 import { ServiceStatsModal } from './Services/ServiceStatsModal.jsx';
 
 /**
@@ -17,14 +16,14 @@ import { ServiceStatsModal } from './Services/ServiceStatsModal.jsx';
  */
 export function AdminServicesPage() {
     const { t } = useTranslation();
+    const { hasRole } = useAuthentication();
+    const isDirector = hasRole('directeur');
     const [services, setServices] = useState([]);
     const [filteredServices, setFilteredServices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchText, setSearchText] = useState('');
 
     // Modals state
-    const [addModalOpen, setAddModalOpen] = useState(false);
-    const [editModalOpen, setEditModalOpen] = useState(false);
     const [statsModalOpen, setStatsModalOpen] = useState(false);
     const [selectedService, setSelectedService] = useState(null);
 
@@ -59,32 +58,6 @@ export function AdminServicesPage() {
         } finally {
             setLoading(false);
         }
-    };
-
-    const handleDelete = (service) => {
-        AntModal.confirm({
-            title: t('services.confirmDelete'),
-            content: `Service : ${service.nom_service}`,
-            okText: t('common.delete'),
-            cancelText: t('common.cancel'),
-            okButtonProps: { danger: true },
-            onOk: async () => {
-                try {
-                    await deleteService(service.id);
-                    message.success(t('services.deleteSuccess'));
-                    fetchServices();
-                } catch (error) {
-                    console.error('Error deleting service:', error);
-                    const msg = error.response?.data?.detail || 'Erreur lors de la suppression';
-                    message.error(msg);
-                }
-            }
-        });
-    };
-
-    const handleEdit = (service) => {
-        setSelectedService(service);
-        setEditModalOpen(true);
     };
 
     const handleStats = (service) => {
@@ -157,28 +130,13 @@ export function AdminServicesPage() {
                     >
                         <BarChart3 className="w-4 h-4" />
                     </button>
-                    <button
-                        onClick={() => handleEdit(record)}
-                        className="p-2 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors"
-                        title={t('services.edit')}
-                    >
-                        <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                        onClick={() => handleDelete(record)}
-                        className="p-2 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
-                        title={t('services.delete')}
-                    >
-                        <Trash2 className="w-4 h-4" />
-                    </button>
                 </div>
             )
         }
     ];
 
     return (
-        <CustomDashboard linkList={newAdminNavLink} requiredRole={"Admin"}>
-            <AdminNavBar />
+        <EtablissementLayout>
             <div className="p-6 bg-gray-50 min-h-screen">
                 {/* Header */}
                 <motion.div
@@ -193,17 +151,14 @@ export function AdminServicesPage() {
                                 <Building2 className="w-7 h-7 text-primary-end" />
                                 {t('services.title')}
                             </h1>
-                            <p className="text-gray-500 mt-1">{t('admin.manageHospitalServices')}</p>
+                            <p className="text-gray-500 mt-1">Liste des services de l&apos;établissement</p>
                         </div>
-                        <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => setAddModalOpen(true)}
-                            className="flex items-center gap-2 bg-gradient-to-r from-primary-start to-primary-end text-white px-5 py-3 rounded-xl shadow-lg hover:shadow-xl transition-shadow font-medium"
+                        <Link
+                            to={isDirector ? AppRoutesPaths.directorServiceRequests : AppRoutesPaths.adminServiceRequestsPage}
+                            className="flex items-center gap-2 bg-gradient-to-r from-primary-start to-primary-end text-white px-5 py-3 rounded-xl shadow-lg font-medium text-sm"
                         >
-                            <Plus className="w-5 h-5" />
-                            {t('services.addService')}
-                        </motion.button>
+                            {isDirector ? 'Demandes de service à signer' : 'Nouvelle demande de service'}
+                        </Link>
                     </div>
                 </motion.div>
 
@@ -248,23 +203,12 @@ export function AdminServicesPage() {
             </div>
 
             {/* Modals */}
-            <AddServiceModal
-                isOpen={addModalOpen}
-                onClose={() => setAddModalOpen(false)}
-                onSuccess={fetchServices}
-            />
-            <EditServiceModal
-                isOpen={editModalOpen}
-                onClose={() => { setEditModalOpen(false); setSelectedService(null); }}
-                onSuccess={fetchServices}
-                service={selectedService}
-            />
             <ServiceStatsModal
                 isOpen={statsModalOpen}
                 onClose={() => { setStatsModalOpen(false); setSelectedService(null); }}
                 service={selectedService}
             />
-        </CustomDashboard>
+        </EtablissementLayout>
     );
 }
 
