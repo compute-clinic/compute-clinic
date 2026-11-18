@@ -20,6 +20,11 @@ class Hospitalisation(models.Model):
     
     motif = models.TextField(verbose_name=_("Motif d'hospitalisation"))
     service = models.CharField(max_length=100, null=True, blank=True, verbose_name=_("Service d'accueil"))
+    service_id = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_("Service d'accueil (id personnel)"),
+    )
     duree_prevue = models.CharField(max_length=100, blank=True, null=True, verbose_name=_("Durée prévue"))
     statut = models.CharField(
         max_length=20,
@@ -27,6 +32,13 @@ class Hospitalisation(models.Model):
         default=StatutHospitalisation.EN_ATTENTE_LIT,
         verbose_name=_("Statut"),
     )
+    # Validation infirmier de la demande médicale (réception → confirmation ou refus)
+    date_demande = models.DateTimeField(auto_now_add=True, null=True, verbose_name=_("Date de la demande médicale"))
+    infirmier_validation_id = models.UUIDField(
+        null=True, blank=True, verbose_name=_("Infirmier ayant confirmé ou refusé"),
+    )
+    date_validation_infirmier = models.DateTimeField(null=True, blank=True)
+    motif_refus = models.TextField(blank=True, default='', verbose_name=_("Motif de non-hospitalisation"))
     validation_medicale = models.BooleanField(default=False, verbose_name=_("Sortie médicale validée"))
     date_validation_medicale = models.DateTimeField(null=True, blank=True)
     validation_financiere = models.BooleanField(default=False, verbose_name=_("Sortie financière validée"))

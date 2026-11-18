@@ -6,6 +6,7 @@ import {
 } from "./medicalDossierApi.js";
 import { confirmerParametresVisite, prendreVisiteEnCharge } from "./visiteApi.js";
 import { getGatewayBaseUrl } from "../Utils/gatewayUrls.js";
+import { getLoggedPersonnelId } from "../Utils/personnelUtils.js";
 
 // ============================================================
 // Fonctions utilitaires internes
@@ -77,7 +78,15 @@ const fetchRendezVousWaiting = async (roles) => {
             let patient;
             try {
                 const p = await fetchPatientCached(rdv.patient);
-                patient = { id: p.id, nom: p.nom, prenom: p.prenom, sexe: p.sexe, age: p.age, matricule: p.matricule };
+                patient = {
+                    id: p.id,
+                    nom: p.nom,
+                    prenom: p.prenom,
+                    sexe: p.sexe,
+                    age: p.age,
+                    matricule: p.matricule,
+                    code_identifiant: p.code_identifiant,
+                };
             } catch {
                 patient = { id: rdv.patient, nom: 'Inconnu', prenom: '', sexe: '-', age: null };
             }
@@ -122,15 +131,11 @@ export const nurseApi = {
     getWaitingPatients: async () => {
         try {
             clearPatientCache();
-            const response = await axiosInstance.get('/visites/');
-            const allVisites = response.data.results || response.data;
-
-            // Filtrer côté client les visites en cours (CORR-A3-007 : exclure déjà prises par autre infirmier)
-            const visitesEnCours = allVisites.filter(v => {
-                if (v.statut !== 'EN_COURS') return false;
-                if (v.parametres_complets) return false;
-                return true;
+            const response = await axiosInstance.get('/visites/', {
+                params: { statut: 'EN_COURS', parametres_complets: false },
             });
+            const payload = response.data?.results ?? response.data;
+            const visitesEnCours = Array.isArray(payload) ? payload : [];
 
             // Enrichir chaque visite avec les détails du patient
             const enriched = await Promise.all(
@@ -145,7 +150,8 @@ export const nurseApi = {
                                 prenom: patient.prenom,
                                 sexe: patient.sexe,
                                 age: patient.age,
-                                matricule: patient.matricule || "—"
+                                matricule: patient.matricule || "—",
+                                code_identifiant: patient.code_identifiant || "",
                             }
                         };
                     } catch {
@@ -157,21 +163,89 @@ export const nurseApi = {
                                 nom: "Inconnu",
                                 prenom: "",
                                 sexe: "-",
-                                age: null
+                                age: null,
+                                code_identifiant: "",
                             }
                         };
                     }
                 })
             );
-            // Ajouter les patients ayant un RDV actif pris par la RÉCEPTION
-            // (routage réception → infirmier). Dédupliqué par patient.
-            const rdvItems = await fetchRendezVousWaiting(['RECEPTIONNISTE']);
-            const dejaPresents = new Set(enriched.map(v => String(v.patient.id)));
-            const rdvUniques = rdvItems.filter(r => !dejaPresents.has(String(r.patient.id)));
-
-            return [...enriched, ...rdvUniques];
+            return enriched;
         } catch (error) {
             console.error("Erreur lors de la récupération de la salle d'attente:", error);
+            const status = error.response?.status;
+            if (status === 401 || status === 403) {
+                const err = new Error(
+                    'Connexion refusée au dossier médical — déconnectez-vous puis reconnectez-vous (Grace Owona / Fultang@123).',
+                );
+                err.code = 'AUTH';
+                throw err;
+            }
+            if (!error.response) {
+                const err = new Error(
+                    'Impossible de joindre la gateway ou le service medical (port 8080). Lancez ./lancer_application.sh --no-build.',
+                );
+                err.code = 'NETWORK';
+                throw err;
+            }
+            throw error;
+        }
+    },
+
+    /**
+     * Visites triées par l'infirmier connecté (paramètres vitaux confirmés).
+     */
+    getMyConsultations: async () => {
+        try {
+            clearPatientCache();
+            const nurseId = getLoggedPersonnelId();
+            const response = await axiosInstance.get('/visites/');
+            const allVisites = response.data.results || response.data;
+
+            const triaged = allVisites.filter(v => {
+                if (v.statut !== 'EN_COURS' || !v.parametres_complets) return false;
+                if (!nurseId) return true;
+                return String(v.infirmier_en_charge_id || '') === String(nurseId);
+            });
+
+            const enriched = await Promise.all(
+                triaged.map(async (visite) => {
+                    try {
+                        const patient = await fetchPatientCached(visite.patient);
+                        return {
+                            ...visite,
+                            patient: {
+                                id: patient.id,
+                                nom: patient.nom,
+                                prenom: patient.prenom,
+                                sexe: patient.sexe,
+                                age: patient.age,
+                                matricule: patient.matricule || "—",
+                                code_identifiant: patient.code_identifiant || "",
+                            }
+                        };
+                    } catch {
+                        return {
+                            ...visite,
+                            patient: {
+                                id: visite.patient,
+                                nom: "Inconnu",
+                                prenom: "",
+                                sexe: "-",
+                                age: null,
+                                matricule: "—",
+                                code_identifiant: "",
+                            }
+                        };
+                    }
+                })
+            );
+
+            return enriched.sort(
+                (a, b) => new Date(b.date_heure || 0) - new Date(a.date_heure || 0)
+            );
+        } catch (error) {
+            console.error("Erreur lors de la récupération des consultations infirmier:", error);
             throw error;
         }
     },

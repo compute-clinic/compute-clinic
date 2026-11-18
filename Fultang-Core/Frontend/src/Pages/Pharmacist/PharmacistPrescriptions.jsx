@@ -252,11 +252,23 @@ export const PharmacistPrescriptions = () => {
                   <div className={`w-11 h-11 rounded-full flex items-center justify-center font-bold text-[13px] shrink-0 ${item.avatarBg} ${item.avatarText}`}>
                     {item.initials}
                   </div>
-                  <div className="flex flex-col">
+                  <div className="flex flex-col gap-1 max-w-xl">
                     <span className="font-semibold text-slate-900 text-[15px] tracking-tight">{item.name}</span>
                     <span className="text-[13px] text-slate-500">
                       {item.patientId} · {item.doctor} · {item.date}
                     </span>
+                    <ul className="text-[12px] text-slate-600 mt-1 space-y-0.5">
+                      {item.medications.map((med, i) => (
+                        <li key={med.id || i}>
+                          <span className="font-medium text-slate-800">{med.nom}</span>
+                          {med.quantite != null && med.quantite !== '' ? ` (×${med.quantite})` : ''}
+                          {' — '}
+                          <span className="text-slate-500">
+                            {med.posologie?.trim() ? med.posologie : 'Posologie non spécifiée'}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
                 <div className="mt-3 sm:mt-0 flex justify-end">

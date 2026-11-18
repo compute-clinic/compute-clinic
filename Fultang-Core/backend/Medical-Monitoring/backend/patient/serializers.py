@@ -97,7 +97,7 @@ class PatientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Patient
         fields = '__all__'
-        read_only_fields = ('id', 'matricule', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'matricule', 'code_identifiant', 'created_at', 'updated_at')
         extra_kwargs = {
             # Généré dans validate() si absent (accueil réception sans N° SS).
             'numero_securite_sociale': {'required': False, 'allow_blank': True},
@@ -111,18 +111,23 @@ class PatientSerializer(serializers.ModelSerializer):
         minimal = self.initial_data.get('est_anonyme') or self.initial_data.get('dossier_incomplet')
         if minimal:
             return cleaned or 'Non renseigné'
-        if not cleaned:
-            raise serializers.ValidationError('La profession est obligatoire.')
-        if cleaned.lower() in ('non renseignée', 'non renseignee', 'n/a', '-'):
-            raise serializers.ValidationError('Indiquez la profession réelle du patient.')
         return cleaned
 
     def validate(self, attrs):
         est_anonyme = attrs.get('est_anonyme', self.initial_data.get('est_anonyme'))
-        code = attrs.get('code_identifiant') or self.initial_data.get('code_identifiant')
+        code = (attrs.get('code_identifiant') or self.initial_data.get('code_identifiant') or '').strip()
         if est_anonyme and code:
             attrs.setdefault('nom', code)
             attrs.setdefault('dossier_incomplet', True)
+            attrs['code_identifiant'] = code
+        elif not est_anonyme and not code:
+            from .patient_code import generate_patient_code
+            attrs['code_identifiant'] = generate_patient_code(
+                attrs.get('nom') or self.initial_data.get('nom') or '',
+                attrs.get('prenom') or self.initial_data.get('prenom') or '',
+            )
+        elif code:
+            attrs['code_identifiant'] = code
         if not attrs.get('numero_securite_sociale'):
             import uuid
             attrs['numero_securite_sociale'] = f"TMP-{uuid.uuid4().hex[:12].upper()}"

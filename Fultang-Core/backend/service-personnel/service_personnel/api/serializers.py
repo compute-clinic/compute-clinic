@@ -5,6 +5,7 @@ from .models import (
     Service, Medecin, MedecinGeneraliste, Infirmiere, Receptionniste,
     ComptableFinancier, ComptableMatiere, Caissier, Laborantin,
     Pharmacien, Directeur, Admin, Prime,
+    ResponsableRH, DemandeService, DocumentPersonnel,
     GradeInfirmier, Langue, NiveauAccreditation, SpecialiteLabo, Statut
 )
 from .tenant_routing.context import get_current_tenant_context
@@ -12,6 +13,7 @@ from .utils import generate_temporary_password
 
 class BasePersonnelSerializer(serializers.ModelSerializer):
     mot_de_passe = serializers.CharField(write_only=True, required=False)
+    service_nom = serializers.SerializerMethodField()
 
     class Meta:
         fields = '__all__'
@@ -63,6 +65,9 @@ class BasePersonnelSerializer(serializers.ModelSerializer):
         else:
             validated_data.pop('mot_de_passe', None)
         return super().update(instance, validated_data)
+
+    def get_service_nom(self, obj):
+        return obj.service.nom_service if getattr(obj, 'service', None) else None
 
 @extend_schema_serializer(
     examples=[
@@ -468,6 +473,29 @@ class AdminSerializer(BasePersonnelSerializer):
         fields = '__all__'
 
 
+class ResponsableRHSerializer(BasePersonnelSerializer):
+    class Meta(BasePersonnelSerializer.Meta):
+        model = ResponsableRH
+        fields = '__all__'
+
+
+class DemandeServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DemandeService
+        read_only_fields = (
+            'id_demande', 'tenant_id', 'statut', 'demandeur_id', 'demandeur_email',
+            'signature_directeur_id', 'date_signature_directeur', 'date_envoi_plateforme',
+            'date_traitement_plateforme', 'service_cree_id', 'date_creation', 'date_maj',
+        )
+        fields = [
+            'id_demande', 'tenant_id', 'nom_service_propose', 'desc_service',
+            'code_analytique_propose', 'statut', 'demandeur_id', 'demandeur_email',
+            'commentaire_admin', 'signature_directeur_id', 'commentaire_directeur',
+            'date_signature_directeur', 'date_envoi_plateforme', 'date_traitement_plateforme',
+            'service_cree_id', 'motif_rejet', 'date_creation', 'date_maj',
+        ]
+
+
 class PrimeSerializer(serializers.ModelSerializer):
     service_nom = serializers.CharField(source='service.nom_service', read_only=True)
 
@@ -477,3 +505,21 @@ class PrimeSerializer(serializers.ModelSerializer):
             'id_prime', 'personnel_id', 'service', 'service_nom',
             'montant_fcfa', 'motif', 'date_debut', 'date_fin',
         ]
+
+
+class DocumentPersonnelSerializer(serializers.ModelSerializer):
+    nom_fichier = serializers.SerializerMethodField()
+    type_document_libelle = serializers.CharField(source='get_type_document_display', read_only=True)
+
+    class Meta:
+        model = DocumentPersonnel
+        fields = [
+            'id', 'personnel_id', 'type_document', 'type_document_libelle',
+            'libelle', 'nom_fichier', 'date_depot', 'depose_par_id',
+        ]
+        read_only_fields = fields
+
+    def get_nom_fichier(self, obj):
+        if not obj.fichier:
+            return ''
+        return obj.fichier.name.rsplit('/', 1)[-1]

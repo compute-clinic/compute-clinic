@@ -15,6 +15,8 @@ import { AppRoutesPaths } from "../../Router/appRouterPaths.js";
 import axiosInstance from "../../Utils/axiosInstance.js";
 import { getVisiteById } from "../../services/visiteApi.js";
 import { getExamPrestations } from "../../services/prestationsApi.js";
+import { getAllServices } from "../../services/servicesApi.js";
+import { getServiceId } from "../../constants/personnelPostes.js";
 
 export const ConsultationPage = () => {
     const [searchParams] = useSearchParams();
@@ -49,10 +51,16 @@ export const ConsultationPage = () => {
     const [newExamen, setNewExamen] = useState({ nom_examen: '', motif: '', categorie: 'BIOLOGIE', prestation_id: '' });
     const [examPrestations, setExamPrestations] = useState([]);
 
-    const [hospitalisation, setHospitalisation] = useState({ service: '', motif: '', urgence: false });
+    const [hospitalisation, setHospitalisation] = useState({ service: '', service_id: '', motif: '', urgence: false });
+    const [servicesHosp, setServicesHosp] = useState([]);
+    const [demandesHosp, setDemandesHosp] = useState([]);
 
     useEffect(() => {
         getExamPrestations().then(setExamPrestations).catch(() => setExamPrestations([]));
+        getAllServices().then((res) => {
+            const list = res?.results || res?.data || res || [];
+            setServicesHosp(Array.isArray(list) ? list : []);
+        }).catch(() => setServicesHosp([]));
     }, []);
 
     useEffect(() => {
@@ -63,15 +71,22 @@ export const ConsultationPage = () => {
         initConsultation();
     }, [patientId, visiteId]);
 
+    useEffect(() => {
+        if (activeTab !== 'examens' || !consultationId || !visiteId) return;
+        doctorApi.getConsultationByVisite(visiteId).then((c) => {
+            if (c?.examens) setExamens(c.examens);
+        }).catch(() => {});
+    }, [activeTab, consultationId, visiteId]);
+
     const initConsultation = useCallback(async () => {
         try {
             setIsLoading(true);
 
             const visite = await getVisiteById(visiteId);
-            if (!visite.mode_urgence && (visite.paiement_actif === false || (!visite.paiement_actif && !visite.paiement_valide))) {
+            if (visite.acces_soins_autorise === false) {
                 const msg = visite.paiement_valide
-                    ? "CORR-A2-002 : le délai de validité du paiement est expiré — le patient doit repasser à la caisse."
-                    : "RG-CF-001 : le patient doit régler la consultation à la caisse avant l'accès médecin.";
+                    ? "Le délai de validité du paiement est expiré — le patient doit repasser à la caisse."
+                    : "Ce patient a été envoyé à la caisse : le dossier n'est visible qu'après règlement.";
                 alert(msg);
                 navigate(AppRoutesPaths.doctorPage);
                 return;
@@ -85,7 +100,7 @@ export const ConsultationPage = () => {
             setPatientData(null);
             setDonneesCliniques(null);
             setConsultationId(null);
-            setHospitalisation({ service: '', motif: '', urgence: false });
+            setHospitalisation({ service: '', service_id: '', motif: '', urgence: false });
             setNewSymptome({ nom: '', description: '', date_apparition: '' });
             setNewDiagnostic({ libelle: '', description: '', type_diagnostic: 'ETIOLOGIQUE' });
             setNewPrescription({ medicament: '', posologie: '', duree: '' });
@@ -99,7 +114,12 @@ export const ConsultationPage = () => {
             setPatientData(dossier);
             setDonneesCliniques(dossier.donnees_cliniques || null);
 
-            const waitingPatients = await doctorApi.getWaitingPatients();
+            let waitingPatients = [];
+            try {
+                waitingPatients = await doctorApi.getWaitingPatients();
+            } catch {
+                waitingPatients = [];
+            }
             const currentVisite = waitingPatients.find(v => v.id === visiteId);
             if (!dossier.donnees_cliniques && currentVisite?.donnees_cliniques) {
                 setDonneesCliniques(currentVisite.donnees_cliniques);
@@ -126,6 +146,13 @@ export const ConsultationPage = () => {
                     patient: patientId
                 });
                 setConsultationId(newConsult.id);
+            }
+
+            try {
+                const hosps = await doctorApi.getHospitalisations({ visite: visiteId });
+                setDemandesHosp(Array.isArray(hosps) ? hosps : []);
+            } catch {
+                setDemandesHosp([]);
             }
 
         } catch (error) {
@@ -274,9 +301,16 @@ export const ConsultationPage = () => {
         if(!hospitalisation.service || !hospitalisation.motif) return;
         try {
             setIsSaving(true);
-            await doctorApi.createHospitalisation(visiteId, hospitalisation);
-            alert("Demande d'hospitalisation envoyée avec succès.");
-            setHospitalisation({ service: '', motif: '', urgence: false });
+            await doctorApi.createHospitalisation(visiteId, {
+                service: hospitalisation.service,
+                service_id: hospitalisation.service_id || undefined,
+                motif: hospitalisation.motif,
+                urgence: hospitalisation.urgence,
+            });
+            alert("Demande envoyée à l'infirmier du service. Il confirmera si le patient est effectivement hospitalisé.");
+            setHospitalisation({ service: '', service_id: '', motif: '', urgence: false });
+            const hosps = await doctorApi.getHospitalisations({ visite: visiteId });
+            setDemandesHosp(Array.isArray(hosps) ? hosps : []);
         } catch (error) {
             alert("Erreur lors de la demande d'hospitalisation.");
         } finally {
@@ -703,17 +737,39 @@ export const ConsultationPage = () => {
                                     </form>
 
                                     <ul className="space-y-3">
-                                        {examens.length === 0 ? <p className="text-gray-400 italic">Aucun examen demandé.</p> : examens.map((e, i) => (
-                                            <li key={i} className="flex justify-between items-center p-3 bg-white border rounded-lg shadow-sm">
-                                                <div>
-                                                    <p className="font-bold text-gray-800">{e.nom || e.nom_examen || e.examen}</p>
-                                                    <p className="text-sm text-gray-500">{e.categorie ? `${e.categorie} — ` : ''}{e.motif || "Sans indication"}</p>
+                                        {examens.length === 0 ? <p className="text-gray-400 italic">Aucun examen demandé.</p> : examens.map((e, i) => {
+                                            const statut = e.statut || 'EN_ATTENTE';
+                                            const realise = ['REALISE', 'VALIDE'].includes(statut) || Boolean(e.resultat);
+                                            const badge = realise
+                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                                : statut === 'PRELEVE'
+                                                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                                    : 'bg-yellow-50 text-yellow-700 border-yellow-200';
+                                            const label = statut === 'REALISE' ? 'Résultat saisi'
+                                                : statut === 'VALIDE' ? 'Validé'
+                                                : statut === 'PRELEVE' ? 'Prélevé'
+                                                : 'En attente';
+                                            return (
+                                            <li key={e.id || i} className="p-3 bg-white border rounded-lg shadow-sm">
+                                                <div className="flex justify-between items-start gap-3">
+                                                    <div>
+                                                        <p className="font-bold text-gray-800">{e.nom || e.nom_examen || e.examen}</p>
+                                                        <p className="text-sm text-gray-500">{e.categorie ? `${e.categorie} — ` : ''}{e.motif || "Sans indication"}</p>
+                                                    </div>
+                                                    <span className={`px-2 py-1 text-xs font-bold rounded-full border ${badge}`}>
+                                                        {label}
+                                                    </span>
                                                 </div>
-                                                <span className="px-2 py-1 bg-yellow-50 text-yellow-700 text-xs font-bold rounded-full border border-yellow-200">
-                                                    En attente
-                                                </span>
+                                                {e.resultat && (
+                                                    <div className="mt-2 text-sm text-gray-700 bg-emerald-50/60 border border-emerald-100 rounded-lg p-2">
+                                                        <p><span className="font-semibold">Résultat :</span> {e.resultat.resultats || '—'}</p>
+                                                        {e.resultat.observations ? <p className="text-gray-600 mt-1">Observations : {e.resultat.observations}</p> : null}
+                                                        {e.resultat.interpretation ? <p className="text-gray-600 mt-1 italic">{e.resultat.interpretation}</p> : null}
+                                                    </div>
+                                                )}
                                             </li>
-                                        ))}
+                                            );
+                                        })}
                                     </ul>
                                 </div>
                             )}
@@ -754,12 +810,31 @@ export const ConsultationPage = () => {
                             {activeTab === 'hospitalisation' && (
                                 <div className="animate-fade-in-up">
                                     <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Demande d'Hospitalisation</h3>
-                                    <p className="text-sm text-gray-500 mb-4">Après validation de la demande, l&apos;infirmier(ère) du service affecte le patient à une salle et un lit.</p>
+                                    <p className="text-sm text-gray-500 mb-4">L&apos;infirmier du service reçoit la demande et confirme si le patient a bien été hospitalisé — ou indique qu&apos;il ne l&apos;a pas été.</p>
                                     
                                     <form onSubmit={handleHospitaliser} className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 flex flex-col gap-4">
                                         <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Service / Unité</label>
-                                            <input type="text" value={hospitalisation.service} onChange={e => setHospitalisation({...hospitalisation, service: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 outline-none" placeholder="Ex: Médecine Générale, Pédiatrie..." required />
+                                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Service d&apos;accueil</label>
+                                            <select
+                                                value={hospitalisation.service_id}
+                                                onChange={(e) => {
+                                                    const svc = servicesHosp.find((s) => String(getServiceId(s)) === e.target.value);
+                                                    setHospitalisation({
+                                                        ...hospitalisation,
+                                                        service_id: e.target.value,
+                                                        service: svc?.nom_service || svc?.nom || '',
+                                                    });
+                                                }}
+                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 outline-none bg-white"
+                                                required
+                                            >
+                                                <option value="">Choisir le service…</option>
+                                                {servicesHosp.map((s) => (
+                                                    <option key={getServiceId(s)} value={String(getServiceId(s))}>
+                                                        {s.nom_service || s.nom}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Motif d'hospitalisation</label>
@@ -775,9 +850,34 @@ export const ConsultationPage = () => {
                                             </button>
                                         </div>
                                     </form>
+                                    {demandesHosp.length > 0 && (
+                                        <div className="space-y-2 mb-4">
+                                            <p className="text-xs font-bold text-gray-500 uppercase">Demandes de cette visite</p>
+                                            {demandesHosp.map((h) => (
+                                                <div key={h.id} className="p-3 rounded-lg border bg-white text-sm">
+                                                    <p className="font-semibold">
+                                                        {h.service || 'Service'}{' '}
+                                                        — {h.statut === 'REFUSEE' ? "Pas d'hospitalisation" : h.statut}
+                                                    </p>
+                                                    <p className="text-gray-500">{h.motif}</p>
+                                                    {h.statut === 'REFUSEE' && (
+                                                        <p className="text-slate-800 mt-1 font-medium">
+                                                            Motif transmis par l&apos;infirmier : {h.motif_refus || '—'}
+                                                        </p>
+                                                    )}
+                                                    {h.statut === 'EN_COURS' && (
+                                                        <p className="text-emerald-700 mt-1">Confirmé par l&apos;infirmier{h.numero_lit ? ` — lit ${h.numero_lit}` : ''}</p>
+                                                    )}
+                                                    {h.statut === 'EN_ATTENTE_LIT' && (
+                                                        <p className="text-amber-700 mt-1">En attente de validation infirmier</p>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                     <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg text-sm text-blue-800">
                                         <p className="font-bold flex items-center"><AlertCircle className="w-4 h-4 mr-2"/> Note</p>
-                                        <p className="mt-1">La demande est transmise à l&apos;infirmier(ère) du service concerné, qui procède à l&apos;affectation de la salle et du lit.</p>
+                                        <p className="mt-1">Seul l&apos;infirmier du service choisi voit cette demande. Les autres services n&apos;y ont pas accès.</p>
                                     </div>
                                 </div>
                             )}

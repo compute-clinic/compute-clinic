@@ -97,10 +97,23 @@ export const useLaboratoryData = () => {
       const examsMap = {};
 
       examList.forEach((exam, idx) => {
-        const patientId = patientIds[idx];
+        const patientId = patientIds[idx] || exam.patient_info?.id;
+        const nomMedecin = (exam.medecin || exam.medecin_prescripteur_nom || '').trim();
         if (!patientId) return;
 
-        const pInfo = patientCache.get(patientId);
+        let pInfo = patientCache.get(patientId);
+        if (!pInfo && exam.patient_info) {
+          const p = exam.patient_info;
+          pInfo = {
+            id: p.id,
+            mat: p.matricule || p.id?.slice?.(0, 8),
+            nom: p.nom || '',
+            prenom: p.prenom || '',
+            fullName: `${p.nom || ''} ${p.prenom || ''}`.trim(),
+            initials: `${(p.nom || '').charAt(0)}${(p.prenom || '').charAt(0)}`.toUpperCase(),
+          };
+          patientCache.set(patientId, pInfo);
+        }
         if (!pInfo) return;
 
         // Construire / mettre à jour l'entrée patient
@@ -114,7 +127,7 @@ export const useLaboratoryData = () => {
             initials: pInfo.initials,
             avatarColor: avatarColorFor(pInfo.id),
             statut: exam.statut?.toLowerCase() || 'en_attente',
-            info: `${exam.nom || '—'} · ${exam.medecin || 'Médecin inconnu'}`,
+            info: nomMedecin ? `${exam.nom || '—'} · ${nomMedecin}` : (exam.nom || '—'),
             urgency: exam.resultat?.valeur_critique || false,
             nomex: (exam.nom || '').toLowerCase(),
             prio: exam.resultat?.valeur_critique ? 'urgence' : 'standard',
@@ -128,7 +141,7 @@ export const useLaboratoryData = () => {
           name: exam.nom || exam.name || '—',
           motif: exam.motif || '—',
           anatomie: exam.anatomie || '—',
-          medecin: exam.medecin || 'Médecin inconnu',
+          medecin: nomMedecin,
           status: exam.statut?.toLowerCase() || 'en_attente',
           // Prélèvement
           prelevement: exam.prelevement || null,

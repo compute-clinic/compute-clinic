@@ -29,10 +29,11 @@ export const SpecialistWaitingRoom = () => {
             setIsLoading(true);
             setError("");
             const data = await doctorApi.getWaitingPatients('specialist');
-            setPatients(data);
+            setPatients(Array.isArray(data) ? data : []);
             setCurrentPage(1);
-        } catch {
-            setError("Impossible de charger la liste des patients référés.");
+        } catch (err) {
+            console.error(err);
+            setPatients([]);
         } finally {
             setIsLoading(false);
         }

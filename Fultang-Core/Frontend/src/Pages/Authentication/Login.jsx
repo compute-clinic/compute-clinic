@@ -32,14 +32,28 @@ export function LoginPage() {
         username: username,
         password: password
     }
-
-
-
     const handleLogin = async (e) => {
         e.preventDefault();
+        setIsLoginErrorPresent(false);
+        setLoginError("");
+
+        const email = username.trim();
+        const pwd = password;
+
+        if (!email) {
+            setIsLoginErrorPresent(true);
+            setLoginError(t("auth.missingEmail"));
+            return;
+        }
+
+        if (!pwd.trim()) {
+            setIsLoginErrorPresent(true);
+            setLoginError(t("auth.missingPassword"));
+            return;
+        }
+
         setIsLoading(true);
-        const response = await login(data);
-        console.log(response);
+        const response = await login({ email, password: pwd });
 
         // Verifier si la connexion a reussi
         if (response && response.success) {
@@ -112,6 +126,9 @@ export function LoginPage() {
                 break;
             case 'directeur':
                 navigate(appRouterPaths.directorDashboard);
+                break;
+            case 'rh':
+                navigate(appRouterPaths.infrastructureRhHome);
                 break;
             case 'platform_admin':
                 navigate(appRouterPaths.platformAdminDashboardPage);
@@ -190,6 +207,7 @@ export function LoginPage() {
                                         <input type="text"
                                             name="username"
                                             autoComplete="username"
+                                            value={username}
                                             onChange={(e) => { setUsername(e.target.value) }}
                                             className="w-full rounded-lg h-12 ml-2 mr-2 bg-gray-300 border-none outline:none focus:border-none ring-0 focus:outline-none focus:ring-0 autofill:shadow-[inset_0_0_0px_1000px_rgb(209,213,219)]"
                                             placeholder={"Enter your username here"} />
@@ -204,6 +222,7 @@ export function LoginPage() {
                                             name="password"
                                             autoComplete="current-password"
                                             type={showPassword ? "text" : "password"}
+                                            value={password}
                                             onChange={(e) => { setPassword(e.target.value) }}
                                             className="w-full rounded-lg h-12 ml-2 mr-10 bg-gray-300 border-none outline:none ring-0 focus:outline-none focus:ring-0"
                                             placeholder="Enter your password here"

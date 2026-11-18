@@ -120,7 +120,7 @@ export const PatientParameters = () => {
             setError('');
             await nurseApi.savePatientParameters(id, { ...parameters, visiteId });
             setIsConfirmModalOpen(false);
-            navigate(AppRoutesPaths.nurseWaitingRoomPage);
+            navigate(AppRoutesPaths.nurseMyConsultationsPage);
         } catch (err) {
             setIsConfirmModalOpen(false);
             setError(err.message || "Une erreur est survenue lors de l'enregistrement.");

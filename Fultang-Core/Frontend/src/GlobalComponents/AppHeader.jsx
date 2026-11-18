@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { LogOut, User, Globe } from 'lucide-react';
+import { LogOut, User, Globe, KeyRound } from 'lucide-react';
+import { ChangePasswordModal } from './ChangePasswordModal.jsx';
 import { Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useAuthentication } from '../Utils/Provider.jsx';
@@ -18,12 +19,13 @@ import { APP_NAME } from '../constants/branding.js';
  * - titleResolver : fonction (pathname) => titre, utilisée si `title` absent
  * - rightSlot : contenu optionnel spécifique à la vue, affiché à droite (ex. badge caisse)
  */
-export function AppHeader({ subtitle = APP_NAME, title, titleResolver, rightSlot = null }) {
+export function AppHeader({ subtitle = APP_NAME, title, titleResolver, rightSlot = null, showPasswordChange = true }) {
     const { logout, userData } = useAuthentication();
     const { i18n } = useTranslation();
     const location = useLocation();
     const [now, setNow] = useState(() => new Date());
     const [langOpen, setLangOpen] = useState(false);
+    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
     const langRef = useRef(null);
 
     const pageTitle = title || (titleResolver ? titleResolver(location.pathname) : '') || subtitle;
@@ -56,6 +58,7 @@ export function AppHeader({ subtitle = APP_NAME, title, titleResolver, rightSlot
     const timeLabel = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     return (
+        <>
         <header className="sticky top-0 z-20 bg-primary-start shadow-md border-b-4 border-primary-end">
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 sm:px-6">
                 <div className="min-w-0">
@@ -113,6 +116,18 @@ export function AppHeader({ subtitle = APP_NAME, title, titleResolver, rightSlot
                             alt=""
                             className="h-9 w-9 rounded-full border-2 border-white/50 object-cover"
                         />
+                        {showPasswordChange && (
+                            <Tooltip title="Modifier mon mot de passe">
+                                <button
+                                    type="button"
+                                    onClick={() => setPasswordModalOpen(true)}
+                                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/30 bg-white/15 text-white hover:bg-white/25 transition-colors"
+                                    aria-label="Modifier mon mot de passe"
+                                >
+                                    <KeyRound size={16} />
+                                </button>
+                            </Tooltip>
+                        )}
                         <Tooltip title="Mon profil">
                             <button
                                 type="button"
@@ -136,6 +151,13 @@ export function AppHeader({ subtitle = APP_NAME, title, titleResolver, rightSlot
                 </div>
             </div>
         </header>
+        {showPasswordChange && (
+            <ChangePasswordModal
+                isOpen={passwordModalOpen}
+                onClose={() => setPasswordModalOpen(false)}
+            />
+        )}
+    </>
     );
 }
 

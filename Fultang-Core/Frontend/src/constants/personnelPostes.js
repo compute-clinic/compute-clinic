@@ -1,6 +1,9 @@
 /**
  * Postes personnel — catégories médical / admin (CORR-A5-007, A5-010).
  */
+/** Postes que le RH ne crée pas (réservés admin / directeur). */
+export const POSTES_RESERVES_RH = ['admin', 'directeur', 'rh'];
+
 export const POSTE_CATEGORIES = {
     medical: {
         label: 'Personnel médical',
@@ -8,7 +11,7 @@ export const POSTE_CATEGORIES = {
     },
     admin: {
         label: 'Personnel administratif',
-        postes: ['receptioniste', 'caissier', 'comptable', 'comptable_matiere', 'directeur', 'admin'],
+        postes: ['receptioniste', 'caissier', 'comptable', 'comptable_matiere', 'directeur', 'admin', 'rh'],
     },
 };
 
@@ -77,5 +80,6 @@ export function buildPostesOptions(t) {
         { value: 'comptable_matiere', label: t('personnel.positions.comptable_matiere', { defaultValue: 'Comptable Matière' }), category: 'admin' },
         { value: 'directeur', label: t('personnel.positions.directeur'), category: 'admin' },
         { value: 'admin', label: t('personnel.positions.admin', { defaultValue: 'Administrateur système' }), category: 'admin' },
+        { value: 'rh', label: t('personnel.positions.rh', { defaultValue: 'Responsable RH' }), category: 'admin' },
     ];
 }

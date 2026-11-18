@@ -15,7 +15,9 @@ export const getVisitesPatient = async (patientId, filters = {}) => {
 /** Visite EN_COURS non encore payée ou paiement expiré. */
 export const getVisiteEnCoursNonPayee = async (patientId) => {
     const visites = await getVisitesPatient(patientId, { statut: 'EN_COURS' });
-    return visites.find((v) => !v.paiement_valide || v.paiement_actif === false) || null;
+    return visites.find((v) =>
+        v.paiement_requis !== false && (!v.paiement_valide || v.paiement_actif === false)
+    ) || null;
 };
 
 export const confirmVisitePaiement = async (visiteId) => {
@@ -36,4 +38,39 @@ export const confirmerParametresVisite = async (visiteId) => {
 export const getVisiteById = async (visiteId) => {
     const response = await axiosInstance.get(`/visites/${visiteId}/`);
     return response.data;
+};
+
+/**
+ * Convertit un RDV en visite concrète (accueil réception) puis clôt le RDV.
+ */
+export const convertRdvToVisite = async ({
+    patientId,
+    rdvId,
+    motif,
+    medecinOrienteId = null,
+    modeUrgence = false,
+    paiementRequis = true,
+    serviceId = null,
+    serviceNom = '',
+}) => {
+    const payload = {
+        patient: patientId,
+        motif_visite: motif,
+        mode_urgence: modeUrgence,
+        paiement_requis: paiementRequis,
+    };
+    if (medecinOrienteId) {
+        payload.medecin_oriente_id = medecinOrienteId;
+    }
+    if (serviceId) payload.service_id = serviceId;
+    if (serviceNom) payload.service_nom = serviceNom;
+    const visiteResponse = await axiosInstance.post('/visites/', payload);
+    if (rdvId) {
+        try {
+            await axiosInstance.patch(`/patient/rendez-vous/${rdvId}/`, { statut: 'TERMINE' });
+        } catch (e) {
+            console.warn('RDV non clôturé après conversion:', e);
+        }
+    }
+    return visiteResponse.data;
 };

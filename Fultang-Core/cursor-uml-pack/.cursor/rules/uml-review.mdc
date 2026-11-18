@@ -1,0 +1,30 @@
+---
+description: Quality gate for UML diagrams. Use when reviewing, correcting, or approving a UML model.
+alwaysApply: false
+---
+
+# UML Review Gate
+
+Before saying a UML model is correct, review it using these questions:
+
+1. What requirement does this diagram represent?
+2. Is the system boundary clear?
+3. Are actors and responsibilities correct?
+4. Does every class have a justified responsibility?
+5. Is every relationship semantically justified?
+6. Are multiplicities supported by requirements?
+7. Are inheritance and composition truly warranted?
+8. Do sequence messages match class responsibilities?
+9. Do activities represent business flow rather than UI clicks only?
+10. Are lifecycle states mutually meaningful and transitions valid?
+11. Are there contradictions between diagrams?
+12. Are any concepts invented without evidence?
+13. Is the diagram readable at normal zoom?
+14. Does the model solve the identified business problem?
+
+Return findings grouped as:
+- Critical modeling errors
+- Important inconsistencies
+- Ambiguities / assumptions
+- Minor notation improvements
+- Suggested corrected model

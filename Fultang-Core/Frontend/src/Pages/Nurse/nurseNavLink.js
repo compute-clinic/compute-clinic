@@ -1,4 +1,4 @@
-import { LayoutGrid, UserRound, Calendar, FlaskConical, Bed } from 'lucide-react';
+import { LayoutGrid, ClipboardList, UserRound, Calendar, FlaskConical, Bed } from 'lucide-react';
 import { AppRoutesPaths } from "../../Router/appRouterPaths.js";
 
 export const nurseNavLink = [
@@ -6,6 +6,11 @@ export const nurseNavLink = [
         name: "Salle d'attente",
         link: AppRoutesPaths.nurseWaitingRoomPage,
         icon: LayoutGrid,
+    },
+    {
+        name: "Mes consultations",
+        link: AppRoutesPaths.nurseMyConsultationsPage,
+        icon: ClipboardList,
     },
     {
         name: "Gestion Patients",

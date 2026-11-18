@@ -1,5 +1,5 @@
 import React from "react"
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Loading } from "../GlobalComponents/Loading.jsx";
 import { AppRoutesPaths } from "./appRouterPaths.js";
 
@@ -20,6 +20,7 @@ export function AppRoute() {
     const LandingPage = React.lazy(async () => ({ default: (await import("../Pages/LandingPage/LandingPage.jsx")).LandingPage }));
     const LandingPageV2 = React.lazy(async () => ({ default: (await import("../Pages/LandingPage/LandingPageV2.jsx")).LandingPageV2 }));
     const NurseWaitingRoomPage = React.lazy(async () => ({ default: (await import("../Pages/Nurse/WaitingRoom.jsx")).WaitingRoom }));
+    const NurseMyConsultationsPage = React.lazy(async () => ({ default: (await import("../Pages/Nurse/NurseMyConsultations.jsx")).NurseMyConsultations }));
     const NurseAppointmentsPage = React.lazy(async () => ({ default: (await import("../Pages/Nurse/NurseAppointments.jsx")).NurseAppointments }));
     const NurseExamsPage = React.lazy(async () => ({ default: (await import("../Pages/Nurse/NurseExams.jsx")).NurseExams }));
     const NurseHospitalizationsPage = React.lazy(async () => ({ default: (await import("../Pages/Nurse/NurseHospitalizations.jsx")).NurseHospitalizations }));
@@ -94,7 +95,14 @@ export function AppRoute() {
     const ComptaMatiereInventoryArchives = React.lazy(async () => ({ default: (await import("../Pages/ComptaMatiere/AccountantInventoryArchives.jsx")).AccountantInventoryArchives }));
 
     // Director components
-    const DirectorDashboard = React.lazy(async () => ({ default: (await import("../Pages/Director/Director.jsx")).Director }));
+    const DirectorDashboard = React.lazy(async () => ({ default: (await import("../Pages/Director/DirectorOverview.jsx")).DirectorOverview }));
+    const DirectorApprovals = React.lazy(async () => ({ default: (await import("../Pages/Director/DirectorApprovals.jsx")).DirectorApprovals }));
+    const DirectorServiceRequests = React.lazy(async () => ({ default: (await import("../Pages/Director/DirectorServiceRequests.jsx")).DirectorServiceRequests }));
+    const RhHomePage = React.lazy(async () => ({ default: (await import("../Pages/Infrastructure/RhHomePage.jsx")).RhHomePage }));
+    const RhPersonnelPage = React.lazy(async () => ({ default: (await import("../Pages/Infrastructure/RhPersonnelPage.jsx")).RhPersonnelPage }));
+    const RhServicesPage = React.lazy(async () => ({ default: (await import("../Pages/Infrastructure/RhServicesPage.jsx")).RhServicesPage }));
+    const AdminServiceRequestsPage = React.lazy(async () => ({ default: (await import("../Pages/AdminViews/AdminServiceRequestsPage.jsx")).AdminServiceRequestsPage }));
+    const PlatformAdminServiceDemandes = React.lazy(async () => ({ default: (await import("../Pages/PlatformAdmin/PlatformAdminServiceDemandes.jsx")).PlatformAdminServiceDemandes }));
     const DirectorReports = React.lazy(async () => ({ default: (await import("../Pages/Director/DirectorReports.jsx")).DirectorReports }));
     const DirectorAudit = React.lazy(async () => ({ default: (await import("../Pages/Director/DirectorAudit.jsx")).DirectorAudit }));
 
@@ -151,8 +159,10 @@ export function AppRoute() {
                 <Route path={AppRoutesPaths.platformAdminCreateTenantPage} element={<PlatformAdminCreateTenantPage />} />
                 <Route path={AppRoutesPaths.platformAdminTenantDetailPage} element={<PlatformAdminTenantDetailPage />} />
                 <Route path={AppRoutesPaths.platformAdminLogsPage} element={<PlatformAdminLogsPage />} />
+                <Route path={AppRoutesPaths.platformAdminServiceDemandes} element={<PlatformAdminServiceDemandes />} />
                 <Route path={AppRoutesPaths.nursePage} element={<NurseWaitingRoomPage />} />
                 <Route path={AppRoutesPaths.nurseWaitingRoomPage} element={<NurseWaitingRoomPage />} />
+                <Route path={AppRoutesPaths.nurseMyConsultationsPage} element={<NurseMyConsultationsPage />} />
                 <Route path={AppRoutesPaths.nursePatientManagementPage} element={<PatientManagementPage />} />
                 <Route path={AppRoutesPaths.nurseAppointmentsPage} element={<NurseAppointmentsPage />} />
                 <Route path={AppRoutesPaths.nurseExamsPage} element={<NurseExamsPage />} />
@@ -169,7 +179,11 @@ export function AppRoute() {
                 {/*<Route path={AppRoutesPaths.laboratoryAssistantPage} element={<LaboratoryAssistantPage />} />*/}
                 <Route path={AppRoutesPaths.adminHomePage} element={<AdminHomePage />} />
                 <Route path={AppRoutesPaths.adminServicesPage} element={<AdminServicesPage />} />
-                <Route path={AppRoutesPaths.adminPersonnelPage} element={<AdminPersonnelPage />} />
+                <Route path={AppRoutesPaths.adminServiceRequestsPage} element={<AdminServiceRequestsPage />} />
+                <Route path={AppRoutesPaths.adminPersonnelPage} element={<Navigate to={AppRoutesPaths.infrastructureRhPersonnel} replace />} />
+                <Route path={AppRoutesPaths.infrastructureRhHome} element={<RhHomePage />} />
+                <Route path={AppRoutesPaths.infrastructureRhPersonnel} element={<RhPersonnelPage />} />
+                <Route path={AppRoutesPaths.infrastructureRhServices} element={<RhServicesPage />} />
                 <Route path={AppRoutesPaths.adminChambresPage} element={<AdminChambresPage />} />
                 <Route path={AppRoutesPaths.receptionistMedicalStaffsPage} element={<ReceptionistMedicalStaffsPage />} />
                 <Route path={AppRoutesPaths.appointmentsPage} element={<ReceptionistAppointmentsPage />} />
@@ -230,6 +244,8 @@ export function AppRoute() {
 
                 {/* Director Routes */}
                 <Route path={AppRoutesPaths.directorDashboard} element={<DirectorDashboard />} />
+                <Route path={AppRoutesPaths.directorApprovals} element={<DirectorApprovals />} />
+                <Route path={AppRoutesPaths.directorServiceRequests} element={<DirectorServiceRequests />} />
                 <Route path={AppRoutesPaths.directorReports} element={<DirectorReports />} />
                 <Route path={AppRoutesPaths.directorAudit} element={<DirectorAudit />} />
 

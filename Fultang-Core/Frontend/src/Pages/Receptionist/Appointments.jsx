@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { DashBoard } from '../../GlobalComponents/DashBoard';
 import { ReceptionistNavBar } from './ReceptionistNavBar';
 import { receptionistNavLink } from './receptionistNavLink';
-import { Calendar, Search, Clock, User, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Calendar, Search, Clock, User, LayoutGrid, List as ListIcon, UserCheck } from 'lucide-react';
 import { Alert } from 'antd';
 import axiosInstance from "../../Utils/axiosInstance.js";
 import { getGatewayBaseUrl } from "../../Utils/gatewayUrls.js";
 import dayjs from 'dayjs';
+import { ConvertRdvToVisitModal } from './ConvertRdvToVisitModal.jsx';
+import { SuccessModal } from '../Modals/SuccessModal.jsx';
 
 export const Appointments = () => {
     const [appointments, setAppointments] = useState([]);
@@ -14,6 +16,10 @@ export const Appointments = () => {
     const [error, setError] = useState(null);
     const [viewMode, setViewMode] = useState('list');
     const [searchQuery, setSearchQuery] = useState("");
+    const [selectedRdv, setSelectedRdv] = useState(null);
+    const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
+    const [canOpenSuccessModal, setCanOpenSuccessModal] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
 
     const fetchAppointments = async () => {
         setIsLoading(true);
@@ -25,9 +31,10 @@ export const Appointments = () => {
             const response = await axiosInstance.get("/patient/rendez-vous/");
             const data = response.data;
             const rawList = Array.isArray(data) ? data : (data.results || []);
-            // Consultation seule : RDV programmés par le médecin (pas créés à l'accueil).
+            // RDV médecin / infirmier programmés — accueil à la réception le jour J.
             const list = rawList.filter(
-                (apt) => (apt.cree_par_role || 'RECEPTIONNISTE') !== 'RECEPTIONNISTE',
+                (apt) => apt.statut === 'PROGRAMME'
+                    && (apt.cree_par_role || 'RECEPTIONNISTE') !== 'RECEPTIONNISTE',
             );
 
             const enriched = await Promise.all(list.map(async (apt) => {
@@ -103,7 +110,7 @@ export const Appointments = () => {
                                 Planning RDV
                             </h2>
                             <p className="text-sm text-gray-500 mt-1">
-                                Consultation des rendez-vous programmés par les médecins (lecture seule)
+                                Accueillez les patients à l&apos;arrivée : conversion RDV → visite, puis caisse
                             </p>
                         </div>
                         <div className="bg-white p-1 rounded-2xl shadow-sm border border-gray-100 flex gap-1">
@@ -152,6 +159,7 @@ export const Appointments = () => {
                                                 <th className="px-8 py-5">Date & Heure</th>
                                                 <th className="px-8 py-5">Patient</th>
                                                 <th className="px-8 py-5">Médecin & Motif</th>
+                                                <th className="px-8 py-5 text-right">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
@@ -175,6 +183,16 @@ export const Appointments = () => {
                                                             <Clock className="w-3.5 h-3.5" /> {getMotif(apt)}
                                                         </div>
                                                     </td>
+                                                    <td className="px-8 py-5 text-right">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setSelectedRdv(apt); setIsConvertModalOpen(true); }}
+                                                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm"
+                                                        >
+                                                            <UserCheck className="w-4 h-4" />
+                                                            Accueillir
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -196,6 +214,14 @@ export const Appointments = () => {
                                                     <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 opacity-50" />{getMotif(apt)}</span>
                                                 </div>
                                             </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setSelectedRdv(apt); setIsConvertModalOpen(true); }}
+                                                className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 shadow-sm shrink-0"
+                                            >
+                                                <UserCheck className="w-4 h-4" />
+                                                Accueillir
+                                            </button>
                                         </div>
                                     ))}
                                 </div>
@@ -203,6 +229,21 @@ export const Appointments = () => {
                         </div>
                     )}
                 </div>
+
+                <ConvertRdvToVisitModal
+                    isOpen={isConvertModalOpen}
+                    onClose={() => { setIsConvertModalOpen(false); setSelectedRdv(null); }}
+                    rdv={selectedRdv}
+                    patientLabel={selectedRdv ? getPatientNom(selectedRdv) : ''}
+                    setSuccessMessage={setSuccessMessage}
+                    setCanOpenSuccessModal={setCanOpenSuccessModal}
+                    onConverted={fetchAppointments}
+                />
+                <SuccessModal
+                    isOpen={canOpenSuccessModal}
+                    canOpenSuccessModal={setCanOpenSuccessModal}
+                    message={successMessage}
+                />
             </ReceptionistNavBar>
         </DashBoard>
     );

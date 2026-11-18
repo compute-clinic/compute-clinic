@@ -29,10 +29,11 @@ export const DoctorWaitingRoom = () => {
             setIsLoading(true);
             setError("");
             const data = await doctorApi.getWaitingPatients();
-            setPatients(data);
+            setPatients(Array.isArray(data) ? data : []);
             setCurrentPage(1);
         } catch (err) {
-            setError("Impossible de charger la liste des patients en attente.");
+            console.error(err);
+            setPatients([]);
         } finally {
             setIsLoading(false);
         }
@@ -46,13 +47,11 @@ export const DoctorWaitingRoom = () => {
             setError("Ce patient doit d'abord être enregistré à la réception, payer à la caisse, puis apparaître en salle d'attente.");
             return;
         }
-        if (item.paiement_valide === false || item.paiement_actif === false) {
-            if (!item.mode_urgence) {
-                setError(item.paiement_valide
-                    ? "CORR-A2-002 : paiement expiré — orientez le patient vers la caisse."
-                    : "RG-CF-001 : consultation non payée — orientez le patient vers la caisse.");
-                return;
-            }
+        if (item.acces_soins_autorise === false) {
+            setError(item.paiement_valide
+                ? "Paiement expiré — orientez le patient vers la caisse."
+                : "Ce patient a été envoyé à la caisse : son dossier n'apparaît ici qu'après règlement.");
+            return;
         }
         try {
             let visiteId = item.id;

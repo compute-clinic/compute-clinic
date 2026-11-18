@@ -108,19 +108,19 @@ export const doctorApi = {
     getWaitingPatients: async () => {
         try {
             clearPatientCache();
-            const medecinId = localStorage.getItem('personnel_id');
-            const response = await axiosInstance.get('/visites/');
-            const allVisites = response.data.results || response.data;
+            const response = await axiosInstance.get('/visites/', {
+                params: { statut: 'EN_COURS', parametres_complets: true },
+            });
+            const payload = response.data?.results ?? response.data;
+            const allVisites = Array.isArray(payload) ? payload : [];
 
-            // CORR-A3-004/011 : triage OK ou urgence ; paiement sauf urgence ; médecin orienté
+            // Après triage infirmier ; caisse requise pour le médecin sauf urgence ou « passer »
             const visitesEnCours = allVisites.filter((v) => {
                 if (v.statut !== 'EN_COURS') return false;
-                if (medecinId && v.medecin_oriente_id && String(v.medecin_oriente_id) !== String(medecinId)) {
-                    return false;
-                }
-                if (!v.parametres_complets && !v.mode_urgence) return false;
-                if (v.mode_urgence) return true;
-                return v.paiement_actif === true || (v.paiement_valide === true && v.paiement_actif !== false);
+                if (!v.parametres_complets) return false;
+                if (v.acces_soins_autorise === false) return false;
+                if (v.mode_urgence || v.paiement_requis === false) return true;
+                return v.paiement_actif === true || v.paiement_valide === true;
             });
 
             // Enrichir chaque visite avec les détails du patient et les données cliniques
@@ -167,10 +167,22 @@ export const doctorApi = {
                 })
             );
 
-            // RDV non payés exclus : la réception doit ouvrir une visite et encaisser avant le médecin.
             return enriched;
         } catch (error) {
             console.error("Erreur lors de la récupération de la salle d'attente (médecin):", error);
+            const status = error.response?.status;
+            if (status === 401 || status === 403) {
+                const err = new Error('Session expirée — reconnectez-vous pour voir la salle d\'attente médecin.');
+                err.code = 'AUTH';
+                throw err;
+            }
+            if (!error.response) {
+                const err = new Error(
+                    'Service medical indisponible — vérifiez Docker (gateway 8080, fultang-medical-backend).',
+                );
+                err.code = 'NETWORK';
+                throw err;
+            }
             throw error;
         }
     },
@@ -428,28 +440,37 @@ export const doctorApi = {
         try {
             clearPatientCache();
             const response = await axiosInstance.get('/examens/', { params });
-            const examens = response.data.results || response.data;
+            const payload = response.data?.results ?? response.data;
+            const examens = Array.isArray(payload) ? payload : [];
 
             const enriched = await Promise.all(
                 examens.map(async (examen) => {
-                    let patientData = { id: null, nom: "Inconnu", prenom: "" };
-                    let datePrescription = null;
-
-                    try {
-                        const consResponse = await axiosInstance.get(`/consultations/${examen.consultation}/`);
-                        const consultation = consResponse.data;
-                        datePrescription = consultation.date_heure;
-
-                        if (consultation.patient) {
-                            const patient = await fetchPatientCached(consultation.patient);
-                            patientData = {
-                                id: patient.id,
-                                nom: patient.nom,
-                                prenom: patient.prenom
-                            };
+                    let patientData = examen.patient_info
+                        ? {
+                            id: examen.patient_info.id,
+                            nom: examen.patient_info.nom,
+                            prenom: examen.patient_info.prenom,
                         }
-                    } catch (e) {
-                        console.warn("Impossible de récupérer le patient pour l'examen", examen.id, e);
+                        : { id: examen.patient || null, nom: '', prenom: '' };
+                    let datePrescription = examen.date_prescription || null;
+
+                    if (!patientData.nom && examen.consultation) {
+                        try {
+                            const consResponse = await axiosInstance.get(`/consultations/${examen.consultation}/`);
+                            const consultation = consResponse.data;
+                            datePrescription = datePrescription || consultation.date_heure;
+
+                            if (consultation.patient) {
+                                const patient = await fetchPatientCached(consultation.patient);
+                                patientData = {
+                                    id: patient.id,
+                                    nom: patient.nom,
+                                    prenom: patient.prenom
+                                };
+                            }
+                        } catch (e) {
+                            console.warn("Impossible de récupérer le patient pour l'examen", examen.id, e);
+                        }
                     }
 
                     return {

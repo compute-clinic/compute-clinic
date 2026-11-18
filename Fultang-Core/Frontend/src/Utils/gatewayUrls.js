@@ -65,3 +65,4 @@ export function resolveTenantLogoUrl(logoDisplayUrl) {
     if (!logoDisplayUrl) return '';
     return logoDisplayUrl.startsWith('http') ? logoDisplayUrl : `${getGatewayBaseUrl()}${logoDisplayUrl}`;
 }
+export const PERSONNEL_MEDECINS_GENERALISTES_URL = () => `${getGatewayBaseUrl()}/personnel/medecins-generalistes/`;

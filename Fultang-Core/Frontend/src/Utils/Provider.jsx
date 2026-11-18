@@ -115,6 +115,7 @@ function useLogin() {
           'Laborantin': 'laborantin',
           'Pharmacien': 'pharmacien',
           'Directeur': 'directeur',
+          'ResponsableRH': 'rh',
         };
 
         // Override par email : Paul = caissier, Njoya = comptabilité financière
@@ -142,6 +143,8 @@ function useLogin() {
           email: gatewayUser.email,
           role: 'personnel',
           poste: effectiveRole,
+          service_id: gatewayUser.service_id ?? null,
+          service_nom: gatewayUser.service_nom || '',
         };
 
         setUserData(user);
@@ -337,6 +340,7 @@ function useLogin() {
         ['compta_matiere', 'material_accountant'],
         ['admin', 'administrateur', 'administrateur_systeme', 'administrator'],
         ['platform_admin', 'platformadmin'],
+        ['rh', 'responsablerh', 'ressources_humaines'],
       ];
 
       for (const group of groups) {

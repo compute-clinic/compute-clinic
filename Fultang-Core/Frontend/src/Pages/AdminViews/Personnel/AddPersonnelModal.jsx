@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Modal, Alert } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { User } from 'lucide-react';
-import { createPersonnel } from '../../../services/personnelApi';
+import { createPersonnel, uploadPersonnelPapier, TYPES_PAPIERS_RH } from '../../../services/personnelApi';
 import { createMedecin } from '../../../services/medecinsApi';
 import { getAllServices } from '../../../services/servicesApi';
 import { getMyFunctionalServices } from '../../../services/tenantConfigApi';
@@ -28,7 +28,7 @@ import {
  * ensuite (seule sa version hashée est stockée).
  * Si le poste est 'medecin', utilise l'endpoint /api/medecins/ avec le champ specialite.
  */
-export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
+export function AddPersonnelModal({ isOpen, onClose, onSuccess, excludePostes = [], includeOnlyPostes = null, enablePapiers = false }) {
     const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [errors, setErrors] = useState({});
@@ -38,6 +38,7 @@ export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
     const [createdCredentials, setCreatedCredentials] = useState(null);
     const [disabledFunctionalServices, setDisabledFunctionalServices] = useState(new Set());
     const [categorie, setCategorie] = useState('');
+    const [papiers, setPapiers] = useState([]);
 
     const ALL_POSTES = useMemo(() => buildPostesOptions(t), [t]);
     // Un poste dont le service fonctionnel associé est désactivé pour cet
@@ -46,9 +47,14 @@ export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
         const serviceCode = POSTE_TO_FUNCTIONAL_SERVICE[p.value];
         return !serviceCode || !disabledFunctionalServices.has(serviceCode);
     });
-    const filteredPostes = categorie
+    let filteredPostes = categorie
         ? POSTES.filter(p => POSTE_CATEGORIES[categorie]?.postes.includes(p.value))
         : POSTES;
+    if (includeOnlyPostes?.length) {
+        filteredPostes = filteredPostes.filter((p) => includeOnlyPostes.includes(p.value));
+    } else {
+        filteredPostes = filteredPostes.filter((p) => !excludePostes.includes(p.value));
+    }
 
     const [formData, setFormData] = useState({
         nom: '',
@@ -151,7 +157,6 @@ export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
             if (formData.adresse?.trim()) {
                 dataToSend.adresse = formData.adresse.trim();
             }
-
             // Si le poste est medecin, utiliser l'endpoint /api/medecins/ avec le champ specialite
             if (formData.poste === 'medecin') {
                 dataToSend.specialite = formData.specialite;
@@ -159,6 +164,21 @@ export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
             const created = formData.poste === 'medecin'
                 ? await createMedecin(dataToSend)
                 : await createPersonnel(dataToSend);
+            const newId = created?.id || created?.id_personnel;
+            if (enablePapiers && newId && papiers.length) {
+                for (const piece of papiers) {
+                    if (!piece.fichier) continue;
+                    try {
+                        await uploadPersonnelPapier(newId, {
+                            fichier: piece.fichier,
+                            type_document: piece.type_document,
+                            libelle: piece.libelle,
+                        });
+                    } catch {
+                        message.warning(`Compte créé, mais le fichier « ${piece.fichier.name} » n'a pas pu être enregistré.`);
+                    }
+                }
+            }
 
             resetForm();
             onSuccess();
@@ -185,6 +205,7 @@ export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
             contact: '', poste: '', specialite: '', service: '', adresse: '',
         });
         setCategorie('');
+        setPapiers([]);
         setErrors({});
         setApiError(null);
     };
@@ -345,6 +366,50 @@ export function AddPersonnelModal({ isOpen, onClose, onSuccess }) {
                         <input type="text" name="adresse" value={formData.adresse} onChange={handleChange}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-end" />
                     </div>
+                    {enablePapiers && (
+                        <div className="col-span-2 rounded-lg border border-dashed border-gray-300 p-3 bg-gray-50">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Papiers du dossier</label>
+                            <p className="text-xs text-gray-500 mb-2">CNI, CV, diplôme, contrat… (PDF, image ou Word, 10 Mo max.)</p>
+                            <input
+                                type="file"
+                                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    e.target.value = '';
+                                    if (!file) return;
+                                    setPapiers((prev) => [...prev, { type_document: 'CNI', libelle: '', fichier: file }]);
+                                }}
+                            />
+                            {papiers.length > 0 && (
+                                <ul className="mt-2 space-y-2">
+                                    {papiers.map((piece, idx) => (
+                                        <li key={`${piece.fichier.name}-${idx}`} className="flex flex-wrap items-center gap-2 text-sm">
+                                            <select
+                                                value={piece.type_document}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    setPapiers((prev) => prev.map((p, i) => (i === idx ? { ...p, type_document: value } : p)));
+                                                }}
+                                                className="px-2 py-1 border rounded"
+                                            >
+                                                {TYPES_PAPIERS_RH.map((t) => (
+                                                    <option key={t.value} value={t.value}>{t.label}</option>
+                                                ))}
+                                            </select>
+                                            <span className="flex-1 truncate">{piece.fichier.name}</span>
+                                            <button
+                                                type="button"
+                                                className="text-red-600 text-xs"
+                                                onClick={() => setPapiers((prev) => prev.filter((_, i) => i !== idx))}
+                                            >
+                                                Retirer
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
         </Modal>

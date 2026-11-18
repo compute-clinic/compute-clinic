@@ -74,6 +74,7 @@ class MedicamentPrescritSerializer(serializers.ModelSerializer):
             fullName = f"{last_name} {first_name}".strip()
             initials = (last_name[0] if last_name else "?") + (first_name[0] if first_name else "")
             return {
+                "id": str(patient.id),
                 "mat": patient.matricule,
                 "fullName": fullName,
                 "initials": initials.upper()
@@ -88,34 +89,13 @@ class MedicamentPrescritSerializer(serializers.ModelSerializer):
             return None
 
     def get_medecin(self, obj):
+        from .personnel_names import nom_personnel
         try:
             doc_id = obj.consultation.medecin_charge
-            if not doc_id:
-                return "Non spécifié"
-            
-            import urllib.request
-            import json
-            headers = {}
             request_obj = self.context.get('request') if hasattr(self, 'context') else None
-            if request_obj:
-                user_id = request_obj.META.get('HTTP_X_USER_ID') or request_obj.headers.get('X-User-Id')
-                user_roles = request_obj.META.get('HTTP_X_USER_ROLES') or request_obj.headers.get('X-User-Roles')
-                if user_id:
-                    headers['X-User-Id'] = user_id
-                if user_roles:
-                    headers['X-User-Roles'] = user_roles
-
-            req = urllib.request.Request(
-                f"http://fultang-personnel:8000/api/personnel/{doc_id}/",
-                headers=headers
-            )
-            with urllib.request.urlopen(req, timeout=2) as response:
-                if response.status == 200:
-                    data = json.loads(response.read().decode('utf-8'))
-                    return f"Dr. {data.get('nom', '')} {data.get('prenom', '')}".strip()
+            return nom_personnel(doc_id, request_obj) or ''
         except Exception:
-            pass
-        return f"Dr. {obj.consultation.medecin_charge[:8] if obj.consultation.medecin_charge else 'Inconnu'}"
+            return ''
 
 class ResultatExamenSerializer(serializers.ModelSerializer):
     valeurs_critiques = ValeurCritiqueSerializer(many=True, read_only=True)
@@ -123,18 +103,27 @@ class ResultatExamenSerializer(serializers.ModelSerializer):
     class Meta:
         model = ResultatExamen
         fields = ['id', 'examen', 'doctor_id', 'observations', 'resultats', 'interpretation', 'valeurs_critiques']
+        extra_kwargs = {'doctor_id': {'required': False}}
 
 class VisiteSerializer(serializers.ModelSerializer):
     paiement_actif = serializers.SerializerMethodField()
     paiement_expire_le = serializers.SerializerMethodField()
+    acces_soins_autorise = serializers.SerializerMethodField()
+    etape_parcours = serializers.SerializerMethodField()
 
     class Meta:
         model = Visite
         fields = '__all__'
-        read_only_fields = ('id', 'date_heure')
+        read_only_fields = ('id', 'date_heure', 'paiement_valide', 'date_paiement')
 
     def get_paiement_actif(self, obj):
         return obj.paiement_est_actif()
+
+    def get_acces_soins_autorise(self, obj):
+        return obj.acces_soins_autorise()
+
+    def get_etape_parcours(self, obj):
+        return obj.etape_parcours
 
     def get_paiement_expire_le(self, obj):
         exp = obj.paiement_expire_le
@@ -155,26 +144,68 @@ class ExamenSerializer(serializers.ModelSerializer):
     resultat = ResultatExamenSerializer(read_only=True)
     prelevements = PrelevementSerializer(many=True, read_only=True)
     medecin_prescripteur_id = serializers.SerializerMethodField()
+    medecin = serializers.SerializerMethodField()
     date_prescription = serializers.SerializerMethodField()
+    patient = serializers.SerializerMethodField()
+    patient_info = serializers.SerializerMethodField()
 
     class Meta:
         model = Examen
         fields = [
             'id', 'consultation', 'nom', 'categorie', 'motif', 'anatomie', 'statut',
-            'resultat', 'prelevements', 'medecin_prescripteur_id', 'date_prescription',
+            'resultat', 'prelevements', 'medecin_prescripteur_id', 'medecin_prescripteur_nom',
+            'medecin', 'date_prescription', 'patient', 'patient_info',
         ]
-        read_only_fields = ('id',)
+        read_only_fields = ('id', 'medecin_prescripteur_nom')
         extra_kwargs = {'categorie': {'required': True}}
 
-    def get_medecin_prescripteur_id(self, obj):
+    def _prescripteur_id(self, obj):
         try:
             return obj.consultation.medecin_charge
         except Exception:
             return None
 
+    def get_medecin_prescripteur_id(self, obj):
+        return self._prescripteur_id(obj)
+
+    def get_medecin(self, obj):
+        stored = (obj.medecin_prescripteur_nom or '').strip()
+        if stored:
+            return stored
+        from .personnel_names import nom_personnel
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        label = nom_personnel(self._prescripteur_id(obj), request)
+        if label:
+            if not obj.medecin_prescripteur_nom:
+                try:
+                    obj.medecin_prescripteur_nom = label
+                    obj.save(update_fields=['medecin_prescripteur_nom'])
+                except Exception:
+                    pass
+            return label
+        return ''
+
     def get_date_prescription(self, obj):
         try:
             return obj.consultation.date_heure.isoformat()
+        except Exception:
+            return None
+
+    def get_patient(self, obj):
+        try:
+            return str(obj.consultation.patient_id)
+        except Exception:
+            return None
+
+    def get_patient_info(self, obj):
+        try:
+            p = obj.consultation.patient
+            return {
+                'id': str(p.id),
+                'nom': p.nom,
+                'prenom': p.prenom,
+                'matricule': getattr(p, 'matricule', '') or '',
+            }
         except Exception:
             return None
 
@@ -203,13 +234,16 @@ class HospitalisationSerializer(serializers.ModelSerializer):
         model = Hospitalisation
         fields = [
             'id', 'patient', 'visite', 'room_id', 'numero_lit', 'doctor_id', 'motif',
-            'service', 'duree_prevue', 'statut',
+            'service', 'service_id', 'duree_prevue', 'statut',
+            'date_demande', 'infirmier_validation_id', 'date_validation_infirmier', 'motif_refus',
             'validation_medicale', 'date_validation_medicale',
             'validation_financiere', 'date_validation_financiere',
             'type_sortie', 'notes_sortie',
             'patient_details', 'medecin_details',
         ]
-        read_only_fields = ('id',)
+        read_only_fields = (
+            'id', 'date_demande', 'infirmier_validation_id', 'date_validation_infirmier', 'motif_refus',
+        )
 
     def validate(self, attrs):
         from .models.choices import StatutHospitalisation

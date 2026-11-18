@@ -142,14 +142,22 @@ export const DoctorExamsList = () => {
                                                         <div className="text-xs text-gray-500 mt-0.5">{exam.categorie} — {exam.motif || "—"}</div>
                                                     </td>
                                                     <td className="p-4">
-                                                        <div className="font-medium text-gray-700">{exam.patient?.nom} {exam.patient?.prenom}</div>
+                                                        <div className="font-medium text-gray-700">
+                                                            {exam.patient?.nom || exam.patient_info?.nom} {exam.patient?.prenom || exam.patient_info?.prenom}
+                                                        </div>
                                                     </td>
                                                     <td className="p-4 text-sm text-gray-600">
                                                         {formatDate(exam.date_prescription)}
                                                     </td>
                                                     <td className="p-4">
-                                                        <span className="flex items-center text-xs font-bold text-yellow-700 bg-yellow-50 border border-yellow-200 px-2 py-1 rounded w-max">
-                                                            {exam.statut}
+                                                        <span className={`flex items-center text-xs font-bold px-2 py-1 rounded w-max border ${
+                                                            exam.statut === 'VALIDE' || exam.statut === 'REALISE'
+                                                                ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                                                                : exam.statut === 'PRELEVE'
+                                                                    ? 'text-blue-800 bg-blue-50 border-blue-200'
+                                                                    : 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                                                        }`}>
+                                                            {exam.statut === 'REALISE' ? 'Résultat saisi' : exam.statut}
                                                         </span>
                                                     </td>
                                                     <td className="p-4 pr-6">

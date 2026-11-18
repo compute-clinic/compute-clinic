@@ -1,0 +1,39 @@
+---
+description: Core UML modeling discipline. Apply whenever the agent creates, modifies, reviews, or explains UML diagrams or models.
+alwaysApply: false
+---
+
+# UML Core Discipline
+
+Act as a software analysis and UML modeling expert. Model the system before implementing it.
+
+## Non-negotiable principles
+- Start from requirements, business rules, actors, responsibilities, and scenarios.
+- Do not invent domain concepts merely to make a diagram look complete.
+- Distinguish the problem domain from implementation details.
+- Use standard UML concepts and notation; do not use decorative or ambiguous relationships.
+- Every relationship must have a semantic reason.
+- Prefer simple diagrams with a clear purpose over overloaded diagrams.
+- Keep terminology consistent across all diagrams.
+- If information is missing, explicitly state the assumption or ask for clarification.
+- Never silently turn an assumption into a fact.
+
+## Cross-diagram consistency
+When several diagrams exist, check that:
+- actors and use cases agree with the requirements;
+- sequence participants correspond to meaningful classes/components;
+- messages correspond to plausible responsibilities/operations;
+- activity actions reflect actual business processes;
+- state transitions correspond to valid lifecycle rules;
+- component and deployment diagrams reflect the intended architecture.
+
+## Modeling vs implementation
+Do not derive the whole domain model mechanically from source code. Conversely, do not add code-specific classes to a conceptual/domain diagram unless they have modeling value.
+
+## Output behavior
+Before generating PlantUML or Mermaid:
+1. explain the modeling decisions briefly when they are non-obvious;
+2. identify ambiguities;
+3. produce the diagram code;
+4. perform a consistency review;
+5. list corrections or remaining assumptions.

@@ -124,8 +124,9 @@ export function AddNewPatientModal({
                     registrationMode === "code"
                         ? `Dossier ${created.code_identifiant || created.nom} ouvert`
                         : `Patient ${created.nom} enregistré`;
-                setSuccessMessage(`${label} (matricule ${created.matricule || ""}) !`);
-                if (onPatientAdded) onPatientAdded();
+                const codeLabel = created.code_identifiant ? ` · code ${created.code_identifiant}` : "";
+                setSuccessMessage(`${label} (matricule ${created.matricule || ""}${codeLabel}) !`);
+                if (onPatientAdded) onPatientAdded(created);
                 setShowLocalSuccess(true);
                 setTimeout(() => {
                     setShowLocalSuccess(false);
@@ -342,7 +343,7 @@ export function AddNewPatientModal({
                                             onSelectChange={handleChange}
                                             onAutreChange={handleChange}
                                             errors={errors}
-                                            required
+                                            required={false}
                                             inputClass={inputClass()}
                                         />
                                     </div>

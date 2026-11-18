@@ -22,6 +22,16 @@ from .serializers import (
     ConciliationMedicamenteuseSerializer, PrelevementSerializer, ValeurCritiqueSerializer,
     InterventionChirurgicaleSerializer, MembreEquipeOperatoireSerializer,
 )
+from .scope import (
+    appliquer_portee_service,
+    est_isole_par_service,
+    est_medecin,
+    est_soignant,
+    filtre_acces_soins,
+    request_roles,
+    request_service_id,
+    request_service_nom,
+)
 
 # --- ViewSets pour les Visites et Consultations ---
 
@@ -42,32 +52,62 @@ class VisiteViewSet(viewsets.ModelViewSet):
     queryset = Visite.objects.all()
     serializer_class = VisiteSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['patient', 'statut', 'paiement_valide', 'medecin_oriente_id']
+    filterset_fields = [
+        'patient', 'statut', 'paiement_valide', 'paiement_requis',
+        'medecin_oriente_id', 'service_id', 'parametres_complets',
+    ]
     ordering = ['-date_heure']
 
+    def get_queryset(self):
+        qs = appliquer_portee_service(super().get_queryset(), self.request)
+        # La caisse masque le dossier au médecin, pas à l'infirmier (triage d'abord).
+        if est_medecin(request_roles(self.request)):
+            qs = filtre_acces_soins(qs)
+        return qs
+
+    def perform_create(self, serializer):
+        import uuid as uuid_lib
+        extra = {}
+        data = self.request.data
+        sid = data.get('service_id') or request_service_id(self.request)
+        snom = data.get('service_nom') or request_service_nom(self.request)
+        if sid not in (None, ''):
+            try:
+                extra['service_id'] = int(sid)
+            except (TypeError, ValueError):
+                pass
+        if snom:
+            extra['service_nom'] = snom
+        medecin_id = data.get('medecin_oriente_id')
+        if medecin_id not in (None, ''):
+            try:
+                extra['medecin_oriente_id'] = uuid_lib.UUID(str(medecin_id))
+            except (TypeError, ValueError):
+                pass
+        serializer.save(**extra)
+
     def _exiger_paiement(self, visite):
-        if visite.mode_urgence:
+        """Bloque l'accès soins tant que la règle Visite.acces_soins_autorise() n'est pas satisfaite."""
+        if visite.acces_soins_autorise():
             return None
-        if not visite.paiement_est_actif():
-            code = 'PAIEMENT_EXPIRE' if visite.paiement_valide else 'PAIEMENT_REQUIS'
-            detail = (
-                'Le délai de validité du paiement est expiré — le patient doit repasser à la caisse.'
-                if visite.paiement_valide else
-                'Le paiement de la consultation doit être enregistré à la caisse avant cette action.'
-            )
-            return Response(
-                {
-                    'error': detail,
-                    'code': code,
-                    'visite_id': str(visite.id),
-                    'paiement_expire_le': (
-                        visite.paiement_expire_le.isoformat()
-                        if visite.paiement_expire_le else None
-                    ),
-                },
-                status=status.HTTP_402_PAYMENT_REQUIRED,
-            )
-        return None
+        code = 'PAIEMENT_EXPIRE' if visite.paiement_valide else 'PAIEMENT_REQUIS'
+        detail = (
+            'Le délai de validité du paiement est expiré — le patient doit repasser à la caisse.'
+            if visite.paiement_valide else
+            'Le patient a été envoyé à la caisse : le paiement doit être enregistré avant cette action.'
+        )
+        return Response(
+            {
+                'error': detail,
+                'code': code,
+                'visite_id': str(visite.id),
+                'paiement_expire_le': (
+                    visite.paiement_expire_le.isoformat()
+                    if visite.paiement_expire_le else None
+                ),
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
 
     def partial_update(self, request, *args, **kwargs):
         visite = self.get_object()
@@ -87,9 +127,25 @@ class VisiteViewSet(viewsets.ModelViewSet):
         visite.save(update_fields=['paiement_valide', 'date_paiement'])
         return Response(VisiteSerializer(visite).data)
 
+    @action(detail=True, methods=['post'], url_path='envoyer-caisse')
+    def envoyer_caisse(self, request, pk=None):
+        """Réception : le patient doit passer à la caisse (dossier masqué aux soins)."""
+        visite = self.get_object()
+        visite.paiement_requis = True
+        visite.save(update_fields=['paiement_requis'])
+        return Response(VisiteSerializer(visite).data)
+
+    @action(detail=True, methods=['post'], url_path='passer-sans-caisse')
+    def passer_sans_caisse(self, request, pk=None):
+        """Réception : le patient passe directement (dossier visible infirmier/médecin)."""
+        visite = self.get_object()
+        visite.paiement_requis = False
+        visite.save(update_fields=['paiement_requis'])
+        return Response(VisiteSerializer(visite).data)
+
     @action(detail=True, methods=['post'], url_path='prendre-en-charge')
     def prendre_en_charge(self, request, pk=None):
-        """Verrouillage infirmier — CORR-A3-007."""
+        """Verrouillage infirmier — CORR-A3-007. Le triage n'attend pas la caisse."""
         import uuid as uuid_lib
         visite = self.get_object()
         user_id = request.META.get('HTTP_X_USER_ID') or request.headers.get('X-User-Id')
@@ -113,10 +169,15 @@ class VisiteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='confirmer-parametres')
     def confirmer_parametres(self, request, pk=None):
-        """Marque le triage infirmier terminé — sync salle d'attente médecin (CORR-A3-004)."""
+        """Marque le triage infirmier terminé — le patient passe ensuite chez le médecin du service."""
         visite = self.get_object()
         visite.parametres_complets = True
-        visite.save(update_fields=['parametres_complets'])
+        nurse_uuid = request.META.get('HTTP_X_USER_ID') or request.headers.get('X-User-Id')
+        update_fields = ['parametres_complets']
+        if nurse_uuid and not visite.infirmier_en_charge_id:
+            visite.infirmier_en_charge_id = nurse_uuid
+            update_fields.append('infirmier_en_charge_id')
+        visite.save(update_fields=update_fields)
         return Response(VisiteSerializer(visite).data)
 
     def get_permissions(self):
@@ -154,6 +215,10 @@ class VisiteViewSet(viewsets.ModelViewSet):
         data['visite'] = visite.id
         data['patient'] = visite.patient.id
         data.pop('room_id', None)
+        if not data.get('service_id') and visite.service_id:
+            data['service_id'] = visite.service_id
+        if not data.get('service') and visite.service_nom:
+            data['service'] = visite.service_nom
 
         user_id = request.META.get('HTTP_X_USER_ID')
         if user_id:
@@ -175,13 +240,28 @@ class ConsultationViewSet(viewsets.ModelViewSet):
     core/permissions.py::HasFunctionalServiceEnabled) : cette phase ne
     requiert pas un test approfondi de ce service en particulier.
     """
-    queryset = Consultation.objects.all()
+    queryset = Consultation.objects.select_related('visite')
     serializer_class = ConsultationSerializer
     permission_classes = [IsAuthenticated, HasFunctionalServiceEnabled.for_service('MEDECINE_GENERALE')]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['visite', 'patient', 'medecin_charge']
     ordering = ['-date_heure']
     ordering_fields = ['date_heure']
+
+    def get_queryset(self):
+        from django.db.models import Q
+        from .scope import request_user_id
+        qs = super().get_queryset().prefetch_related(
+            'examens', 'examens__resultat', 'examens__prelevements',
+        )
+        visites = appliquer_portee_service(Visite.objects.all(), self.request)
+        if est_medecin(request_roles(self.request)):
+            visites = filtre_acces_soins(visites)
+        scope = Q(visite__in=visites)
+        uid = request_user_id(self.request)
+        if uid:
+            scope |= Q(medecin_charge=str(uid))
+        return qs.filter(scope).distinct()
 
     def perform_create(self, serializer):
         user_id = self.request.META.get('HTTP_X_USER_ID') or self.request.headers.get('X-User-Id')
@@ -219,14 +299,20 @@ class ConsultationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='examens')
     def prescrire_examen(self, request, pk=None):
         """Prescrit un examen pour cette consultation."""
+        from .personnel_names import nom_depuis_requete, nom_personnel
         consultation = self.get_object()
         data = request.data.copy()
         data['consultation'] = consultation.id
-        
-        serializer = ExamenSerializer(data=data)
+        user_id = request.META.get('HTTP_X_USER_ID') or request.headers.get('X-User-Id')
+        if user_id and not consultation.medecin_charge:
+            consultation.medecin_charge = user_id
+            consultation.save(update_fields=['medecin_charge'])
+
+        serializer = ExamenSerializer(data=data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            nom = nom_depuis_requete(request) or nom_personnel(consultation.medecin_charge, request)
+            examen = serializer.save(medecin_prescripteur_nom=nom or '')
+            return Response(ExamenSerializer(examen, context={'request': request}).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], url_path='prescriptions')
@@ -287,13 +373,25 @@ class ExamenViewSet(viewsets.ModelViewSet):
         return permissions
 
     def get_queryset(self):
-        queryset = super().get_queryset().select_related('consultation')
+        from django.db.models import Q
+        queryset = super().get_queryset().select_related(
+            'consultation', 'consultation__visite', 'consultation__patient',
+        ).prefetch_related('resultat', 'prelevements')
         statut = self.request.query_params.get('statut')
         medecin = self.request.query_params.get('medecin')
         if statut:
             queryset = queryset.filter(statut=statut)
         if medecin:
             queryset = queryset.filter(consultation__medecin_charge=str(medecin))
+        roles = request_roles(self.request)
+        if est_isole_par_service(roles):
+            from .scope import request_user_id
+            visites = appliquer_portee_service(Visite.objects.all(), self.request)
+            uid = request_user_id(self.request)
+            scope = Q(consultation__visite__in=visites)
+            if uid:
+                scope |= Q(consultation__medecin_charge=str(uid))
+            queryset = queryset.filter(scope)
         return queryset
 
     @action(detail=True, methods=['get', 'post'], url_path='resultat')
@@ -316,20 +414,29 @@ class ExamenViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND
                 )
         
-        # Logique POST
         data = request.data.copy()
         data['examen'] = examen.id
-        
-        serializer = ResultatExamenSerializer(data=data)
+        if not data.get('doctor_id'):
+            data['doctor_id'] = (
+                request.META.get('HTTP_X_USER_ID')
+                or request.headers.get('X-User-Id')
+                or '00000000-0000-0000-0000-000000000001'
+            )
+
+        try:
+            existing = examen.resultat
+        except ResultatExamen.DoesNotExist:
+            existing = None
+
+        serializer = ResultatExamenSerializer(instance=existing, data=data, partial=bool(existing))
         if serializer.is_valid():
-            # 1. Enregistrement du résultat
             serializer.save()
-            
-            # 2. Mise à jour du statut de l'examen
             examen.statut = StatutExamen.REALISE
-            examen.save()
-            
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            examen.save(update_fields=['statut'])
+            return Response(
+                serializer.data,
+                status=status.HTTP_200_OK if existing else status.HTTP_201_CREATED,
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], url_path='prelevement')
@@ -385,12 +492,91 @@ class HospitalisationViewSet(viewsets.ModelViewSet):
     search_fields = ['patient__nom', 'patient__prenom', 'patient__matricule']
 
     def get_queryset(self):
-        """Permet de filtrer globalement par statut (ex: EN_COURS)."""
-        queryset = super().get_queryset()
-        statut = self.request.query_params.get('statut')
+        """Filtres : statut (ex: EN_COURS), visite, patient, doctor_id. Isolé par service."""
+        queryset = appliquer_portee_service(
+            super().get_queryset(),
+            self.request,
+            service_id_field='service_id',
+            service_nom_field='service',
+        )
+        params = self.request.query_params
+        statut = params.get('statut')
         if statut:
             queryset = queryset.filter(statut=statut)
+        for field in ('visite', 'patient', 'doctor_id', 'service_id'):
+            value = params.get(field)
+            if value:
+                queryset = queryset.filter(**{field: value})
         return queryset
+
+    @staticmethod
+    def _nurse_uuid(request):
+        import uuid as uuid_lib
+        user_id = request.META.get('HTTP_X_USER_ID') or request.headers.get('X-User-Id')
+        if not user_id:
+            return None
+        try:
+            return uuid_lib.UUID(str(user_id))
+        except ValueError:
+            return uuid_lib.uuid5(uuid_lib.NAMESPACE_DNS, str(user_id))
+
+    @action(detail=True, methods=['post'], url_path='confirmer')
+    def confirmer(self, request, pk=None):
+        """
+        L'infirmier confirme que le patient a bien été hospitalisé.
+        L'affectation salle/lit peut suivre (assigner-chambre).
+        """
+        from .models.choices import StatutHospitalisation
+        hosp = self.get_object()
+        if hosp.statut != StatutHospitalisation.EN_ATTENTE_LIT:
+            return Response(
+                {'error': 'Seule une demande en attente peut être confirmée.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        hosp.statut = StatutHospitalisation.EN_COURS
+        hosp.infirmier_validation_id = self._nurse_uuid(request)
+        hosp.date_validation_infirmier = timezone.now()
+        room_id = request.data.get('room_id')
+        numero_lit = (request.data.get('numero_lit') or '').strip()
+        update_fields = ['statut', 'infirmier_validation_id', 'date_validation_infirmier']
+        if room_id:
+            hosp.room_id = room_id
+            update_fields.append('room_id')
+        if numero_lit:
+            hosp.numero_lit = numero_lit
+            update_fields.append('numero_lit')
+        hosp.save(update_fields=update_fields)
+        return Response(HospitalisationSerializer(hosp, context={'request': request}).data)
+
+    def _enregistrer_pas_d_hospi(self, request, hosp):
+        from .models.choices import StatutHospitalisation
+        if hosp.statut != StatutHospitalisation.EN_ATTENTE_LIT:
+            return Response(
+                {'error': 'Seule une demande en attente peut être clôturée sans hospitalisation.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        motif = (request.data.get('motif_refus') or request.data.get('motif') or '').strip()
+        if not motif:
+            return Response(
+                {'error': 'Indiquez le motif (refus du patient, patient parti, autre).'},
+                status=400,
+            )
+        hosp.statut = StatutHospitalisation.REFUSEE
+        hosp.motif_refus = motif
+        hosp.infirmier_validation_id = self._nurse_uuid(request)
+        hosp.date_validation_infirmier = timezone.now()
+        hosp.save(update_fields=['statut', 'motif_refus', 'infirmier_validation_id', 'date_validation_infirmier'])
+        return Response(HospitalisationSerializer(hosp, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='pas-d-hospi')
+    def pas_d_hospi(self, request, pk=None):
+        """Infirmier : le patient n'a pas été hospitalisé (refus patient / départ). Motif → médecin."""
+        return self._enregistrer_pas_d_hospi(request, self.get_object())
+
+    @action(detail=True, methods=['post'], url_path='refuser')
+    def refuser(self, request, pk=None):
+        """Alias conservé de pas-d-hospi."""
+        return self._enregistrer_pas_d_hospi(request, self.get_object())
 
     def partial_update(self, request, *args, **kwargs):
         if 'room_id' in request.data:
@@ -419,8 +605,14 @@ class HospitalisationViewSet(viewsets.ModelViewSet):
             )
         hosp.room_id = room_id
         hosp.numero_lit = numero_lit
+        update_fields = ['room_id', 'numero_lit', 'statut']
+        if hosp.statut == StatutHospitalisation.EN_ATTENTE_LIT:
+            # Première affectation = confirmation par l'infirmier que le patient est bien hospitalisé.
+            hosp.infirmier_validation_id = self._nurse_uuid(request)
+            hosp.date_validation_infirmier = timezone.now()
+            update_fields += ['infirmier_validation_id', 'date_validation_infirmier']
         hosp.statut = StatutHospitalisation.EN_COURS
-        hosp.save(update_fields=['room_id', 'numero_lit', 'statut'])
+        hosp.save(update_fields=update_fields)
         return Response(HospitalisationSerializer(hosp, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='demander-sortie')
@@ -506,7 +698,7 @@ class MedicamentPrescritViewSet(viewsets.ModelViewSet):
         return permissions
 
     def get_queryset(self):
-        """Permet de filtrer par patient ou par statut."""
+        """Permet de filtrer par patient ou par statut. Isolé par service pour les soignants."""
         queryset = super().get_queryset()
         patient_id = self.request.query_params.get('patient')
         statut = self.request.query_params.get('statut')
@@ -514,6 +706,9 @@ class MedicamentPrescritViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(consultation__patient_id=patient_id)
         if statut:
             queryset = queryset.filter(statut=statut)
+        if est_isole_par_service(request_roles(self.request)):
+            visites = appliquer_portee_service(Visite.objects.all(), self.request)
+            queryset = queryset.filter(consultation__visite__in=visites)
         return queryset
 
     @action(detail=True, methods=['post'], url_path='anomalie')

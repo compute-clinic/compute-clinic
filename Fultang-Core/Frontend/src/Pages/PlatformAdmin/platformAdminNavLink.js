@@ -30,4 +30,9 @@ export const platformAdminNavLink = [
         link: appRoutes.platformAdminCreateTenantPage,
         icon: PlusCircle,
     },
+    {
+        name: "Services établissements",
+        link: appRoutes.platformAdminServiceDemandes,
+        icon: Building2,
+    },
 ];

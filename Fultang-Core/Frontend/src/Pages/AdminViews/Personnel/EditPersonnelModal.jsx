@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { User } from 'lucide-react';
 import { updatePersonnel } from '../../../services/personnelApi';
 import { getAllServices } from '../../../services/servicesApi';
+import { isValidPhone, phoneErrorMessage } from '../../../Utils/phoneValidation.js';
 
 /**
  * Modal pour modifier un personnel existant.
@@ -77,8 +78,8 @@ export function EditPersonnelModal({ isOpen, onClose, onSuccess, personnel }) {
         const newErrors = {};
         if (!formData.nom.trim()) newErrors.nom = t('services.required');
         if (!formData.email.trim()) newErrors.email = t('services.required');
-        if (formData.contact && !/^6\d{8}$/.test(formData.contact)) {
-            newErrors.contact = t('services.phoneFormat');
+        if (formData.contact && !isValidPhone(formData.contact, { required: false })) {
+            newErrors.contact = phoneErrorMessage(t('personnel.contact') || t('personnel.phone'));
         }
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
