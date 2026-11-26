@@ -18,4 +18,4 @@ if not defined BASH (
 "%BASH%" "%~dp0demarrer.sh" %*
 set CODE=%ERRORLEVEL%
 if "%~1"=="" pause
-exit /b %CODE%
+exit /b %CODE%
