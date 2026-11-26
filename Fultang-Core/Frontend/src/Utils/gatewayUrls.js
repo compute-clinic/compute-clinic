@@ -26,6 +26,14 @@ export function getGatewayBaseUrl() {
         return `${protocol}//${hostname}:8080`;
     }
 
+    // Page ouverte depuis un autre poste du réseau (ex. http://192.168.1.20:5173) :
+    // « localhost » désignerait le PC du visiteur, pas celui qui héberge
+    // l'application. On vise alors la passerelle sur la même machine que la page.
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(hostname);
+    if (!local) {
+        return `${protocol}//${hostname}:8080`;
+    }
+
     const fromEnv = import.meta.env.VITE_API_GATEWAY_URL;
     if (fromEnv) {
         return fromEnv.replace(/\/$/, '');
