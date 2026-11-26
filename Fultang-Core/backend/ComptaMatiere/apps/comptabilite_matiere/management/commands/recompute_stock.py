@@ -16,6 +16,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Sum
 
+from core.tenant_routing.context import reset_tenant_context, set_tenant_context
 from apps.comptabilite_matiere.models import (
     Materiel,
     LigneLivraison,
@@ -35,6 +36,16 @@ class Command(BaseCommand):
                             help="Ne traiter qu'un seul matériel (code_materiel).")
 
     def handle(self, *args, **options):
+        # Hors requete HTTP, aucun Tenant Context n'existe : le routeur leverait
+        # TenantContextMissingError (AH-13). Ce script vise le pool non assigne
+        # (tenant_id=None -> base 'default'), comme les comptes de demonstration.
+        jeton = set_tenant_context(None)
+        try:
+            return self._executer(*args, **options)
+        finally:
+            reset_tenant_context(jeton)
+
+    def _executer(self, *args, **options):
         dry_run = options["dry_run"]
         code = options["code"]
 

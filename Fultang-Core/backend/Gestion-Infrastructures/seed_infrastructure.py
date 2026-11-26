@@ -13,11 +13,11 @@ from infrastructures.models import TypeBatiment, TypeSalle, Batiment, Etage, Sal
 def seed():
     print("Seeding infrastructure database...")
     # 1. TypeBatiment
-    tb_medical, _ = TypeBatiment.objects.get_or_create(nom="HOPITAL_PRINCIPAL", description="Bâtiment principal médical")
+    tb_medical, _ = TypeBatiment.objects.get_or_create(nom="HOPITAL_PRINCIPAL", defaults={"description": "Bâtiment principal médical"})
     
     # 2. TypeSalle
-    ts_hosp, _ = TypeSalle.objects.get_or_create(nom="Chambre d'hospitalisation", description="Chambre pour séjour hospitalier")
-    ts_consult, _ = TypeSalle.objects.get_or_create(nom="Salle de consultation", description="Salle pour consultations médicales")
+    ts_hosp, _ = TypeSalle.objects.get_or_create(nom="Chambre d'hospitalisation", defaults={"description": "Chambre pour séjour hospitalier"})
+    ts_consult, _ = TypeSalle.objects.get_or_create(nom="Salle de consultation", defaults={"description": "Salle pour consultations médicales"})
     
     # 3. Batiment
     bat, _ = Batiment.objects.get_or_create(
@@ -53,4 +53,12 @@ def seed():
     print("Infrastructures database seeded successfully!")
 
 if __name__ == '__main__':
-    seed()
+    # Hors requete HTTP, aucun Tenant Context n'existe et le routeur refuse tout
+    # acces (AH-26). Les donnees de demonstration vont dans le pool non assigne
+    # (tenant_id=None -> base 'default'), comme les comptes de demonstration.
+    from config.tenant_routing.context import reset_tenant_context, set_tenant_context
+    jeton = set_tenant_context(None)
+    try:
+        seed()
+    finally:
+        reset_tenant_context(jeton)

@@ -583,6 +583,14 @@ def _build_user_headers(headers: dict, payload: Optional[dict]) -> dict:
             headers["X-User-Service-Id"] = str(payload["service_id"])
         if payload.get("service_nom"):
             headers["X-User-Service-Nom"] = str(payload["service_nom"])
+        # Un nom, prénom ou service accentué (« Réception », « Médecine ») fait
+        # échouer httpx, qui n'accepte que l'ASCII dans une valeur texte : la
+        # requête finissait en erreur 500. On transmet donc des octets latin-1,
+        # que Django (WSGI) relit exactement en latin-1 dans request.META.
+        # Un caractère hors latin-1 (ex. « œ ») devient « ? ».
+        for cle in ("X-User-Nom", "X-User-Prenom", "X-User-Service-Nom", "X-User-Email"):
+            if cle in headers:
+                headers[cle] = headers[cle].encode("latin-1", errors="replace")
     return headers
 
 

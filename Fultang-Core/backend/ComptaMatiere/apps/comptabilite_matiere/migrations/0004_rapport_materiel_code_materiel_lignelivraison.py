@@ -10,10 +10,13 @@ class Migration(migrations.Migration):
     ]
 
     def gen_unique_codes(apps, schema_editor):
+        # Base visee par la migration (routeur multi-tenant : sans ce using(),
+        # l'ORM leve TenantContextMissingError). Voir AH-13.
+        alias = schema_editor.connection.alias
         Materiel = apps.get_model("comptabilite_matiere", "Materiel")
-        for row in Materiel.objects.all():
+        for row in Materiel.objects.using(alias).all():
             row.code_materiel = f"MAT-{row.pk}"
-            row.save()
+            row.save(using=alias)
 
     operations = [
         migrations.CreateModel(

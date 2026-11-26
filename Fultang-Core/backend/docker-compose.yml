@@ -56,7 +56,9 @@ services:
         condition: service_healthy
     restart: on-failure
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/', timeout=3)\" 2>/dev/null || exit 1"]
+      # /api/ exige une connexion (401) : on verifie seulement que le serveur
+      # Django accepte les connexions sur son port (AH-14).
+      test: ["CMD-SHELL", "python -c \"import socket; socket.create_connection(('localhost', 8000), 3)\" 2>/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -79,8 +81,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U admin -d service_personnel"]
       interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 30
+      start_period: 60s
     networks:
       - fultang_shared_network
 

@@ -12,6 +12,7 @@ Usage :
   python manage.py seed_demo --flush   # Vide la BD compta puis recrée tout
 """
 from django.core.management.base import BaseCommand
+from config.tenant_routing.context import reset_tenant_context, set_tenant_context
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
@@ -29,6 +30,16 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # Hors requete HTTP, aucun Tenant Context n'existe : le routeur leverait
+        # TenantContextMissingError (AH-26). Les donnees de demonstration vont dans
+        # le pool non assigne (tenant_id=None -> base 'default').
+        jeton = set_tenant_context(None)
+        try:
+            return self._executer(*args, **options)
+        finally:
+            reset_tenant_context(jeton)
+
+    def _executer(self, *args, **options):
         if options['flush']:
             self._flush_all()
 

@@ -56,14 +56,14 @@ if [ "$SEED_ONLY" -eq 0 ]; then
         (cd backend && ./start_all.sh)
     fi
 
-    echo -e "\n${CYAN}➔ Frontend (http://localhost:3000)…${NC}"
+    echo -e "\n${CYAN}➔ Frontend (http://127.0.0.1:5173)…${NC}"
     if [ -f Frontend/docker-compose.yml ]; then
         if [ "$NO_BUILD" -eq 1 ]; then
             (cd Frontend && docker compose up -d)
         else
             (cd Frontend && docker compose build --pull=false && docker compose up -d)
         fi
-        echo -e "${GREEN}✓ Frontend sur le port 3000${NC}"
+        echo -e "${GREEN}✓ Frontend sur le port 5173${NC}"
     else
         echo -e "${RED}⚠ Frontend/docker-compose.yml introuvable${NC}"
     fi
@@ -75,7 +75,7 @@ chmod +x backend/apply_seed.sh
 
 echo -e "\n${BLUE}======================================================${NC}"
 echo -e "${GREEN}🎉 Application prête${NC}"
-echo -e "${CYAN}👉 Interface : http://localhost:3000/${NC}"
-echo -e "${CYAN}👉 Gateway  : http://localhost:8080/${NC}"
+echo -e "${CYAN}👉 Interface : http://127.0.0.1:5173/${NC}"
+echo -e "${CYAN}👉 Gateway  : http://127.0.0.1:8080/${NC}"
 echo -e "${BLUE}======================================================${NC}"
 echo -e "Pour recharger uniquement les données :  ${CYAN}./lancer_application.sh --seed-only${NC}"
