@@ -15,14 +15,25 @@ Ce fichier répertorie les identifiants et mots de passe par défaut créés par
 | **Médecin Spécialiste** | Dupont Jean | `jean.dupont@fultang.local` | `password123` | Chirurgie |
 | **Médecin Spécialiste** | Mballa Sophie | `sophie.mballa@fultang.local` | `Fultang@123` | Neurologie |
 | **Médecin Généraliste** | Kengne Alain | `alain.kengne@fultang.local` | `Fultang@123` | Consultation générale |
-| **Infirmier / Infirmière** | Ateba Marie | `marie.ateba@fultang.local` | `Fultang@123` | Maternité |
+| **Infirmière 1** | Ateba Marie | `marie.ateba@fultang.local` | `Fultang@123` | Maternité |
+| **Infirmière 2** | Ndongo Fatou | `fatou.ndongo@fultang.local` | `Fultang@123` | Chirurgie |
+| **Infirmière 3** | Owona Grace | `grace.owona@fultang.local` | `Fultang@123` | Consultation générale |
+| **Infirmière 4** | Fouda Aimée | `aimee.fouda@fultang.local` | `Fultang@123` | Neurologie |
+| **Infirmière 5** | Menga Inès | `ines.menga@fultang.local` | `Fultang@123` | Urgences |
 | **Laborantin** | Kamga Luc | `luc.kamga@fultang.local` | `Fultang@123` | Laboratoire |
-| **Laborantin (Nouveau)** | Tchakounté Alain | `labo.tchakounte@fultang.local` | `Fultang@123` | Laboratoire |
+| **Laborantin (Nouveau)** | Tchakounté Alain | `labo.tchakounte@fultang.local` | `Fultang@123` | Laboratoire (absent de `seed_data.py`, voir la note ci-dessous) |
 | **Pharmacien** | Ekani Sylvie | `sylvie.ekani@fultang.local` | `Fultang@123` | Pharmacie |
 | **Pharmacien (Nouveau)** | Dupont Pierre | `pharmacien@fultang.local` | `Fultang@123` | Pharmacie |
 | **Caissier** | Talla Paul | `paul.talla@fultang.local` | `Fultang@123` | Administration |
 | **Comptable Financier** | Njoya Isabelle | `i.njoya@fultang.local` | `Fultang@123` | Administration |
 | **Comptable Matière** | Manga Alice | `a.matiere@fultang.local` | `Fultang@123` | Administration |
+| **Responsable RH** | Mvondo Sandrine | `rh@fultang.local` | `Fultang@123` | Administration |
+
+> [!NOTE]
+> Liste mise à jour le 28/11/2026 d'après `backend/service-personnel/service_personnel/seed_data.py`.
+> - Chaque service de soins a sa propre infirmière : pour suivre le parcours d'un patient, connectez-vous avec l'infirmière du service où sa visite est ouverte (par exemple Owona Grace pour la consultation générale).
+> - Le compte `labo.tchakounte@fultang.local` ne figure pas dans `seed_data.py` : il n'existe que si quelqu'un l'a créé à la main.
+> - Le compte RH est bien créé par `seed_data.py`, mais, lors de nos essais, il n'a pas pu se connecter.
 
 ---
 
